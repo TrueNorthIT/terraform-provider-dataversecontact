@@ -1,0 +1,9 @@
+terraform-provider-dataversecontact
+terraform-provider-dataversecontact.exe
+*.exe
+dist/
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+.terraform.lock.hcl
