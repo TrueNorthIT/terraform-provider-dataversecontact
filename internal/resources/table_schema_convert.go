@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -89,13 +90,23 @@ type FieldHintJSON struct {
 
 // modelToSchemaJSON converts the HCL resource model into a JSON blob for the API.
 func modelToSchemaJSON(ctx context.Context, model *TableResourceModel, diags *diag.Diagnostics) json.RawMessage {
+	// Apply defaults for optional-with-computed fields
+	logicalName := model.DataverseLogicalName.ValueString()
+	if logicalName == "" {
+		logicalName = singularize(model.DataverseTable.ValueString())
+	}
+	requiredPermission := model.RequiredPermission.ValueString()
+	if requiredPermission == "" {
+		requiredPermission = model.RouteName.ValueString()
+	}
+
 	hint := SchemaHintJSON{
 		RouteName:            model.RouteName.ValueString(),
 		Description:          model.Description.ValueString(),
 		Icon:                 model.Icon.ValueString(),
 		DataverseTable:       model.DataverseTable.ValueString(),
-		DataverseLogicalName: model.DataverseLogicalName.ValueString(),
-		RequiredPermission:   model.RequiredPermission.ValueString(),
+		DataverseLogicalName: logicalName,
+		RequiredPermission:   requiredPermission,
 		PrimaryKey:           model.PrimaryKey.ValueString(),
 		PermissionGroup:      model.PermissionGroup.ValueString(),
 		FetchXml:             model.FetchXml.ValueString(),
@@ -107,6 +118,11 @@ func modelToSchemaJSON(ctx context.Context, model *TableResourceModel, diags *di
 	hint.Aliases = tfListToStrings(ctx, model.Aliases, diags)
 	hint.LookupSearchContains = tfListToStrings(ctx, model.LookupSearchContains, diags)
 	hint.Filters = tfListToStrings(ctx, model.Filters, diags)
+
+	// Default filters to ["statecode eq 0"] if not specified
+	if hint.Filters == nil {
+		hint.Filters = []string{"statecode eq 0"}
+	}
 
 	// Booleans with non-false defaults
 	if !model.PublicChoices.IsNull() && !model.PublicChoices.IsUnknown() {
@@ -188,7 +204,7 @@ func schemaJSONToModel(ctx context.Context, raw json.RawMessage, model *TableRes
 	model.LookupFields = stringsToTFList(hint.LookupFields)
 	model.Aliases = stringsToTFListOrNull(hint.Aliases)
 	model.LookupSearchContains = stringsToTFList(hint.LookupSearchContains)
-	model.Filters = stringsToTFListOrNull(hint.Filters)
+	model.Filters = stringsToTFList(hint.Filters)
 
 	// Booleans
 	if hint.PublicChoices != nil {
@@ -502,6 +518,37 @@ func boolOrNull(b bool) basetypes.BoolValue {
 		return types.BoolNull()
 	}
 	return types.BoolValue(true)
+}
+
+// singularize converts a Dataverse entity set name (plural) to the entity
+// logical name (singular). Handles common English pluralization rules.
+// Examples: incidents→incident, bookingstatuses→bookingstatus,
+// bookableresourcecategories→bookableresourcecategory.
+func singularize(word string) string {
+	// Handle prefixed entities (e.g. tn_citizenservicebookings)
+	for i, c := range word {
+		if c == '_' && i > 0 {
+			return word[:i+1] + singularize(word[i+1:])
+		}
+	}
+	switch {
+	case strings.HasSuffix(word, "ies"):
+		return word[:len(word)-3] + "y"
+	case strings.HasSuffix(word, "sses"):
+		return word[:len(word)-2]
+	case strings.HasSuffix(word, "uses"):
+		return word[:len(word)-2]
+	case strings.HasSuffix(word, "xes"):
+		return word[:len(word)-2]
+	case strings.HasSuffix(word, "shes"):
+		return word[:len(word)-2]
+	case strings.HasSuffix(word, "ches"):
+		return word[:len(word)-2]
+	case strings.HasSuffix(word, "s"):
+		return word[:len(word)-1]
+	default:
+		return word
+	}
 }
 
 // ── Attribute type helpers (for constructing types.Object / types.Map) ──
