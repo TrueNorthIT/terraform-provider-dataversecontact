@@ -3,7 +3,6 @@ package resources
 import (
 	"context"
 	"encoding/json"
-	"sort"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -566,15 +565,4 @@ func fieldAttrTypes() map[string]attr.Type {
 
 func fieldObjectType() attr.Type {
 	return types.ObjectType{AttrTypes: fieldAttrTypes()}
-}
-
-// ── Sorted field keys (for stable field_count) ──────────────────────────
-
-func sortedKeys(m map[string]FieldHintJSON) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
