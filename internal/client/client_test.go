@@ -22,7 +22,7 @@ func TestNewClient(t *testing.T) {
 func TestAdminURL(t *testing.T) {
 	c := NewClient("https://example.com", "key")
 	url := c.adminURL("default", "table-definitions")
-	expected := "https://example.com/api/v2/default/admin/table-definitions"
+	expected := "https://example.com/api/v2/_admin/default/table-definitions"
 	if url != expected {
 		t.Errorf("expected %s, got %s", expected, url)
 	}
@@ -31,7 +31,7 @@ func TestAdminURL(t *testing.T) {
 func TestAdminURLWithScope(t *testing.T) {
 	c := NewClient("https://example.com", "key")
 	url := c.adminURL("hr", "table-manager/case")
-	expected := "https://example.com/api/v2/hr/admin/table-manager/case"
+	expected := "https://example.com/api/v2/_admin/hr/table-manager/case"
 	if url != expected {
 		t.Errorf("expected %s, got %s", expected, url)
 	}

@@ -1,12 +1,28 @@
 package client
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
-// EnsureAuth0 syncs permissions to Auth0 for a scope.
-func (c *Client) EnsureAuth0(ctx context.Context, scope string) (*EnsureAuth0Response, error) {
-	url := c.adminURL(scope, "table-manager/ensure-auth0")
-	var resp EnsureAuth0Response
-	if err := c.doJSON(ctx, "POST", url, nil, &resp); err != nil {
+// PublishDefaults publishes a scope's baseline permissions (its defaults.json)
+// via PUT /api/v2/_admin/{scope}/table-manager/defaults.
+//
+// permissions maps each route name to the list of baseline permission tokens
+// granted to every authenticated contact for that route (e.g.
+// {"case": ["team", "write", "create"]}). allowSelfRegister toggles
+// self-registration for citizen-facing scopes.
+func (c *Client) PublishDefaults(ctx context.Context, scope string, permissions map[string][]string, allowSelfRegister bool) (*PublishDefaultsResponse, error) {
+	url := c.adminURL(scope, "table-manager/defaults")
+	if permissions == nil {
+		permissions = map[string][]string{}
+	}
+	body := PublishDefaultsRequest{
+		Permissions:       permissions,
+		AllowSelfRegister: allowSelfRegister,
+	}
+	var resp PublishDefaultsResponse
+	if err := c.doJSON(ctx, "PUT", url, body, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -14,8 +30,8 @@ func (c *Client) EnsureAuth0(ctx context.Context, scope string) (*EnsureAuth0Res
 
 // GetScopes returns all available scopes.
 func (c *Client) GetScopes(ctx context.Context) (*ScopesResponse, error) {
-	// Scopes endpoint uses "default" scope in the URL but returns all scopes
-	url := c.adminURL("default", "table-manager/scopes")
+	// The scopes listing is exposed at /api/v2/_admin/scopes (no scope segment).
+	url := fmt.Sprintf("%s/api/v2/_admin/scopes", c.BaseURL)
 	var resp ScopesResponse
 	if err := c.doJSON(ctx, "GET", url, nil, &resp); err != nil {
 		return nil, err

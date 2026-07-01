@@ -7,11 +7,13 @@ terraform {
 }
 
 provider "dataversecontact" {
-  api_url = "https://acme-api.vercel.app"
-  api_key = var.admin_api_key
+  api_url        = "https://api.dataverse-contact.tnapps.co.uk"
+  connection_key = var.connection_key
 }
 
-variable "admin_api_key" {
+# The admin connection key. This must match the ADMIN_CONNECTION_KEY
+# configured on the API deployment.
+variable "connection_key" {
   type      = string
   sensitive = true
 }

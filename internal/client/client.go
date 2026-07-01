@@ -33,7 +33,7 @@ func NewClient(baseURL, apiKey string) *Client {
 
 // adminURL builds the full URL for an admin endpoint.
 func (c *Client) adminURL(scope, path string) string {
-	return fmt.Sprintf("%s/api/v2/%s/admin/%s", c.BaseURL, scope, path)
+	return fmt.Sprintf("%s/api/v2/_admin/%s/%s", c.BaseURL, scope, path)
 }
 
 // doRequest executes an HTTP request with auth and logging.

@@ -10,7 +10,7 @@ import (
 
 func TestGetTableDefinitions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v2/default/admin/table-definitions" {
+		if r.URL.Path != "/api/v2/_admin/default/table-definitions" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		if r.Method != "GET" {
@@ -53,7 +53,7 @@ func TestGetTableDefinitions(t *testing.T) {
 
 func TestGetTable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v2/default/admin/table-manager/case" {
+		if r.URL.Path != "/api/v2/_admin/default/table-manager/case" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		json.NewEncoder(w).Encode(TableManagerResponse{
@@ -83,7 +83,7 @@ func TestSaveAndPublishTable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		switch {
-		case r.Method == "PUT" && r.URL.Path == "/api/v2/default/admin/table-manager/case":
+		case r.Method == "PUT" && r.URL.Path == "/api/v2/_admin/default/table-manager/case":
 			json.NewDecoder(r.Body).Decode(&savedBody)
 			json.NewEncoder(w).Encode(SaveDraftResponse{
 				Message: "Draft saved",
@@ -92,7 +92,7 @@ func TestSaveAndPublishTable(t *testing.T) {
 					ChangeType: "new",
 				},
 			})
-		case r.Method == "POST" && r.URL.Path == "/api/v2/default/admin/table-manager/publish":
+		case r.Method == "POST" && r.URL.Path == "/api/v2/_admin/default/table-manager/publish":
 			json.NewEncoder(w).Encode(PublishResponse{
 				Message:   "Published 1 table(s)",
 				Published: []string{"case"},
@@ -124,11 +124,11 @@ func TestDeleteTable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls = append(calls, r.Method+" "+r.URL.Path)
 		switch {
-		case r.Method == "POST" && r.URL.Path == "/api/v2/default/admin/table-manager/unpublish":
+		case r.Method == "POST" && r.URL.Path == "/api/v2/_admin/default/table-manager/unpublish":
 			json.NewEncoder(w).Encode(UnpublishResponse{Unpublished: []string{"case"}})
-		case r.Method == "POST" && r.URL.Path == "/api/v2/default/admin/table-manager/remove":
+		case r.Method == "POST" && r.URL.Path == "/api/v2/_admin/default/table-manager/remove":
 			json.NewEncoder(w).Encode(RemoveResponse{Removed: []string{"case"}})
-		case r.Method == "DELETE" && r.URL.Path == "/api/v2/default/admin/table-manager/recycled/case":
+		case r.Method == "DELETE" && r.URL.Path == "/api/v2/_admin/default/table-manager/recycled/case":
 			json.NewEncoder(w).Encode(DeleteRecycledResponse{RouteName: "case"})
 		default:
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
