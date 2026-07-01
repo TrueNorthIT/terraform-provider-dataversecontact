@@ -17,16 +17,16 @@ func (e *APIError) String() string {
 
 // TableDefinition represents a table as returned by GET /table-definitions.
 type TableDefinition struct {
-	RouteName           string          `json:"routeName"`
-	Source              string          `json:"source"`
-	Description         string          `json:"description,omitempty"`
-	Icon                string          `json:"icon,omitempty"`
-	DataverseTable      string          `json:"dataverseTable"`
-	DataverseLogicalName string         `json:"dataverseLogicalName"`
-	RequiredPermission  string          `json:"requiredPermission"`
-	PrimaryKey          string          `json:"primaryKey"`
-	FieldCount          int             `json:"fieldCount"`
-	Fields              json.RawMessage `json:"fields,omitempty"`
+	RouteName            string          `json:"routeName"`
+	Source               string          `json:"source"`
+	Description          string          `json:"description,omitempty"`
+	Icon                 string          `json:"icon,omitempty"`
+	DataverseTable       string          `json:"dataverseTable"`
+	DataverseLogicalName string          `json:"dataverseLogicalName"`
+	RequiredPermission   string          `json:"requiredPermission"`
+	PrimaryKey           string          `json:"primaryKey"`
+	FieldCount           int             `json:"fieldCount"`
+	Fields               json.RawMessage `json:"fields,omitempty"`
 }
 
 // TableDefinitionsResponse is the response from GET /table-definitions.
@@ -172,19 +172,21 @@ type CustomApiRemoveResponse struct {
 
 // --- Permissions Types ---
 
-// EnsureAuth0Response is the response from POST /table-manager/ensure-auth0.
-type EnsureAuth0Response struct {
-	Message   string   `json:"message"`
-	Created   bool     `json:"created"`
-	Audience  string   `json:"audience"`
-	Added     []string `json:"added"`
-	Unchanged []string `json:"unchanged"`
-	Unmanaged []string `json:"unmanaged"`
+// PublishDefaultsRequest is the request body for PUT /table-manager/defaults.
+// It mirrors the shape of a scope's defaults.json.
+type PublishDefaultsRequest struct {
+	Permissions       map[string][]string `json:"permissions"`
+	AllowSelfRegister bool                `json:"allowSelfRegister"`
+}
+
+// PublishDefaultsResponse is the response from PUT /table-manager/defaults.
+type PublishDefaultsResponse struct {
+	Message string `json:"message,omitempty"`
 }
 
 // --- Scopes Types ---
 
-// ScopesResponse is the response from GET /table-manager/scopes.
+// ScopesResponse is the response from GET /api/v2/_admin/scopes.
 type ScopesResponse struct {
 	Scopes []string `json:"scopes"`
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 
 	"github.com/tnapps/terraform-provider-dataversecontact/internal/client"
 	"github.com/tnapps/terraform-provider-dataversecontact/internal/datasources"
@@ -24,12 +25,9 @@ type DataverseContactProvider struct {
 
 // DataverseContactProviderModel describes the provider data model.
 type DataverseContactProviderModel struct {
-	APIURL            types.String `tfsdk:"api_url"`
-	APIKey            types.String `tfsdk:"api_key"`
-	Auth0Domain       types.String `tfsdk:"auth0_domain"`
-	Auth0ClientID     types.String `tfsdk:"auth0_client_id"`
-	Auth0ClientSecret types.String `tfsdk:"auth0_client_secret"`
-	Auth0Audience     types.String `tfsdk:"auth0_audience"`
+	APIURL        types.String `tfsdk:"api_url"`
+	ConnectionKey types.String `tfsdk:"connection_key"`
+	APIKey        types.String `tfsdk:"api_key"`
 }
 
 // New returns a new provider factory function.
@@ -49,42 +47,29 @@ func (p *DataverseContactProvider) Metadata(_ context.Context, _ provider.Metada
 func (p *DataverseContactProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Terraform provider for managing Dataverse Contact API table schemas, custom APIs, and permissions.\n\n" +
-			"Supports two authentication modes:\n" +
-			"  1. Auth0 M2M (recommended): set auth0_domain, auth0_client_id, auth0_client_secret, and auth0_audience.\n" +
-			"  2. Static API key: set api_key directly (e.g. a forged MCP key).",
+			"Authentication uses a static admin connection key. Mint an admin connection key on the API side, " +
+			"set it as the `ADMIN_CONNECTION_KEY` environment variable on the API deployment, and pass the same " +
+			"value here as `connection_key` (or via the `DATAVERSE_CONTACT_CONNECTION_KEY` environment variable). " +
+			"The provider sends it as an `Authorization: Bearer <key>` header on every admin request.",
 		Attributes: map[string]schema.Attribute{
 			"api_url": schema.StringAttribute{
-				Description: "Base URL of the Dataverse Contact API (e.g. https://acme-api.vercel.app). " +
+				Description: "Base URL of the Dataverse Contact API (e.g. https://api.dataverse-contact.tnapps.co.uk). " +
 					"Can also be set with the DATAVERSE_CONTACT_API_URL environment variable.",
 				Optional: true,
 			},
+			"connection_key": schema.StringAttribute{
+				Description: "Admin connection key (Bearer token) for authenticating with the admin endpoints. " +
+					"This is the same value configured as ADMIN_CONNECTION_KEY on the API deployment. " +
+					"Can also be set with the DATAVERSE_CONTACT_CONNECTION_KEY environment variable.",
+				Optional:  true,
+				Sensitive: true,
+			},
 			"api_key": schema.StringAttribute{
-				Description: "Static API key (Bearer token) for authenticating with the admin endpoints. " +
-					"Can also be set with the DATAVERSE_CONTACT_API_KEY environment variable. " +
-					"Not needed when using Auth0 M2M authentication.",
-				Optional:  true,
-				Sensitive: true,
-			},
-			"auth0_domain": schema.StringAttribute{
-				Description: "Auth0 tenant domain (e.g. your-tenant.auth0.com). " +
-					"Can also be set with the AUTH0_DOMAIN environment variable.",
-				Optional: true,
-			},
-			"auth0_client_id": schema.StringAttribute{
-				Description: "Auth0 M2M application client ID. " +
-					"Can also be set with the AUTH0_CLIENT_ID environment variable.",
-				Optional: true,
-			},
-			"auth0_client_secret": schema.StringAttribute{
-				Description: "Auth0 M2M application client secret. " +
-					"Can also be set with the AUTH0_CLIENT_SECRET environment variable.",
-				Optional:  true,
-				Sensitive: true,
-			},
-			"auth0_audience": schema.StringAttribute{
-				Description: "Auth0 API audience for the admin endpoint (e.g. https://tn-dataverse-contact-api/default/_admin). " +
-					"Can also be set with the AUTH0_AUDIENCE environment variable.",
-				Optional: true,
+				Description: "Deprecated: use connection_key instead. Legacy static API key (Bearer token). " +
+					"Can also be set with the DATAVERSE_CONTACT_API_KEY environment variable.",
+				Optional:           true,
+				Sensitive:          true,
+				DeprecationMessage: "Use connection_key (or DATAVERSE_CONTACT_CONNECTION_KEY) instead. api_key will be removed in a future release.",
 			},
 		},
 	}
@@ -111,53 +96,38 @@ func (p *DataverseContactProvider) Configure(ctx context.Context, req provider.C
 		return
 	}
 
-	// Resolve API Key — either static or via Auth0 M2M token exchange
-	apiKey := os.Getenv("DATAVERSE_CONTACT_API_KEY")
-	if !config.APIKey.IsNull() {
-		apiKey = config.APIKey.ValueString()
+	// Resolve the admin connection key.
+	connectionKey := os.Getenv("DATAVERSE_CONTACT_CONNECTION_KEY")
+	if !config.ConnectionKey.IsNull() {
+		connectionKey = config.ConnectionKey.ValueString()
 	}
 
-	// If no static key, try Auth0 M2M client credentials
-	if apiKey == "" {
-		auth0Domain := envOrConfig(config.Auth0Domain, "AUTH0_DOMAIN")
-		auth0ClientID := envOrConfig(config.Auth0ClientID, "AUTH0_CLIENT_ID")
-		auth0ClientSecret := envOrConfig(config.Auth0ClientSecret, "AUTH0_CLIENT_SECRET")
-		auth0Audience := envOrConfig(config.Auth0Audience, "AUTH0_AUDIENCE")
-
-		if auth0Domain != "" && auth0ClientID != "" && auth0ClientSecret != "" && auth0Audience != "" {
-			token, err := client.Auth0TokenExchange(auth0Domain, auth0ClientID, auth0ClientSecret, auth0Audience)
-			if err != nil {
-				resp.Diagnostics.AddError(
-					"Auth0 Token Exchange Failed",
-					"Failed to obtain access token from Auth0: "+err.Error(),
-				)
-				return
-			}
-			apiKey = token
+	// Legacy fallback: the deprecated api_key attribute / DATAVERSE_CONTACT_API_KEY.
+	if connectionKey == "" {
+		legacyKey := os.Getenv("DATAVERSE_CONTACT_API_KEY")
+		if !config.APIKey.IsNull() {
+			legacyKey = config.APIKey.ValueString()
+		}
+		if legacyKey != "" {
+			tflog.Warn(ctx, "The 'api_key' attribute (and DATAVERSE_CONTACT_API_KEY) is deprecated; "+
+				"use 'connection_key' (or DATAVERSE_CONTACT_CONNECTION_KEY) instead.")
+			connectionKey = legacyKey
 		}
 	}
 
-	if apiKey == "" {
+	if connectionKey == "" {
 		resp.Diagnostics.AddError(
-			"Missing Authentication",
-			"The provider requires either api_key or Auth0 M2M credentials "+
-				"(auth0_domain, auth0_client_id, auth0_client_secret, auth0_audience). "+
-				"These can be set in the provider configuration or via environment variables.",
+			"Missing Admin Connection Key",
+			"The provider requires an admin connection key. Set connection_key in the provider "+
+				"configuration or the DATAVERSE_CONTACT_CONNECTION_KEY environment variable. This must "+
+				"match the ADMIN_CONNECTION_KEY configured on the API deployment.",
 		)
 		return
 	}
 
-	c := client.NewClient(apiURL, apiKey)
+	c := client.NewClient(apiURL, connectionKey)
 	resp.DataSourceData = c
 	resp.ResourceData = c
-}
-
-// envOrConfig returns the config value if set, otherwise the environment variable.
-func envOrConfig(configVal types.String, envVar string) string {
-	if !configVal.IsNull() {
-		return configVal.ValueString()
-	}
-	return os.Getenv(envVar)
 }
 
 func (p *DataverseContactProvider) Resources(_ context.Context) []func() resource.Resource {

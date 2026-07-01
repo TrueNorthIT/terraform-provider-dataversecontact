@@ -33,7 +33,7 @@ func NewClient(baseURL, apiKey string) *Client {
 
 // adminURL builds the full URL for an admin endpoint.
 func (c *Client) adminURL(scope, path string) string {
-	return fmt.Sprintf("%s/api/v2/%s/admin/%s", c.BaseURL, scope, path)
+	return fmt.Sprintf("%s/api/v2/_admin/%s/%s", c.BaseURL, scope, path)
 }
 
 // doRequest executes an HTTP request with auth and logging.
@@ -66,7 +66,7 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body interfa
 	if err != nil {
 		return nil, 0, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

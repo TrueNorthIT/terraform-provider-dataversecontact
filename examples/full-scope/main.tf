@@ -7,10 +7,13 @@ terraform {
 }
 
 variable "api_url" {
-  type = string
+  type    = string
+  default = "https://api.dataverse-contact.tnapps.co.uk"
 }
 
-variable "api_key" {
+# The admin connection key. This must match the ADMIN_CONNECTION_KEY
+# configured on the API deployment.
+variable "connection_key" {
   type      = string
   sensitive = true
 }
@@ -21,8 +24,8 @@ variable "scope_name" {
 }
 
 provider "dataversecontact" {
-  api_url = var.api_url
-  api_key = var.api_key
+  api_url        = var.api_url
+  connection_key = var.connection_key
 }
 
 # List existing scopes
@@ -44,9 +47,17 @@ resource "dataversecontact_custom_api" "apis" {
   schema_json = file("${path.module}/schemas/${var.scope_name}/${each.value}")
 }
 
-# Sync permissions after all tables and custom APIs are published
+# Publish baseline permissions (defaults.json) after all tables and custom APIs are published
 resource "dataversecontact_permissions_sync" "scope" {
   scope = var.scope_name
+
+  # Baseline permissions granted to every authenticated contact, keyed by route name.
+  default_permissions = {
+    case = ["team", "write", "create"]
+  }
+
+  # Enable self-registration for citizen-facing scopes.
+  allow_self_register = false
 
   triggers = {
     tables_hash = sha256(join(",", [for t in dataversecontact_table.tables : t.id]))
@@ -77,10 +88,6 @@ output "published_apis" {
     id                   = a.id
     dataverse_unique_name = a.dataverse_unique_name
   }}
-}
-
-output "auth0_audience" {
-  value = dataversecontact_permissions_sync.scope.audience
 }
 
 output "permission_count" {
