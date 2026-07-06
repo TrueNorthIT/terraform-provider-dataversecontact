@@ -177,6 +177,24 @@ type CustomApiRemoveResponse struct {
 type PublishDefaultsRequest struct {
 	Permissions       map[string][]string `json:"permissions"`
 	AllowSelfRegister bool                `json:"allowSelfRegister"`
+	CompanyModel      *CompanyModel       `json:"companyModel,omitempty"`
+}
+
+// CompanyModel mirrors the API's per-scope companyModel config. Omitted (nil)
+// means the classic parent-account (multi-contact) model.
+type CompanyModel struct {
+	// "parent-account" or "associated-accounts".
+	Strategy           string                   `json:"strategy"`
+	AssociatedAccounts *AssociatedAccountsQuery `json:"associatedAccounts,omitempty"`
+}
+
+// AssociatedAccountsQuery describes how a single contact's linked accounts are
+// resolved for the associated-accounts model. Supply relationship or fetchXml.
+type AssociatedAccountsQuery struct {
+	Relationship     string `json:"relationship,omitempty"`
+	AccountIDField   string `json:"accountIdField,omitempty"`
+	AccountNameField string `json:"accountNameField,omitempty"`
+	FetchXML         string `json:"fetchXml,omitempty"`
 }
 
 // PublishDefaultsResponse is the response from PUT /table-manager/defaults.

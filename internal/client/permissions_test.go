@@ -23,7 +23,7 @@ func TestPublishDefaults(t *testing.T) {
 
 	c := NewClient(server.URL, "key")
 	perms := map[string][]string{"case": {"team", "write", "create"}}
-	resp, err := c.PublishDefaults(context.Background(), "default", perms, true)
+	resp, err := c.PublishDefaults(context.Background(), "default", perms, true, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -40,8 +40,42 @@ func TestPublishDefaults(t *testing.T) {
 	if got := gotBody.Permissions["case"]; len(got) != 3 {
 		t.Errorf("expected 3 case permissions, got %v", got)
 	}
+	if gotBody.CompanyModel != nil {
+		t.Errorf("expected no companyModel when nil, got %+v", gotBody.CompanyModel)
+	}
 	if resp.Message != "published" {
 		t.Errorf("expected message 'published', got %q", resp.Message)
+	}
+}
+
+func TestPublishDefaultsCompanyModel(t *testing.T) {
+	var gotBody PublishDefaultsRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "key")
+	cm := &CompanyModel{
+		Strategy:           "associated-accounts",
+		AssociatedAccounts: &AssociatedAccountsQuery{Relationship: "cr_contact_accounts"},
+	}
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, cm); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotBody.CompanyModel == nil {
+		t.Fatalf("expected companyModel in request body")
+	}
+	if gotBody.CompanyModel.Strategy != "associated-accounts" {
+		t.Errorf("unexpected strategy: %s", gotBody.CompanyModel.Strategy)
+	}
+	if gotBody.CompanyModel.AssociatedAccounts == nil ||
+		gotBody.CompanyModel.AssociatedAccounts.Relationship != "cr_contact_accounts" {
+		t.Errorf("unexpected associatedAccounts: %+v", gotBody.CompanyModel.AssociatedAccounts)
 	}
 }
 
@@ -56,7 +90,7 @@ func TestPublishDefaultsNilPermissions(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient(server.URL, "key")
-	if _, err := c.PublishDefaults(context.Background(), "default", nil, false); err != nil {
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 

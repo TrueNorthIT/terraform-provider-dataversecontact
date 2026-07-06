@@ -23,12 +23,27 @@ type PermissionsSyncResource struct {
 
 // PermissionsSyncResourceModel describes the resource data model.
 type PermissionsSyncResourceModel struct {
-	ID                 types.String `tfsdk:"id"`
-	Scope              types.String `tfsdk:"scope"`
-	Triggers           types.Map    `tfsdk:"triggers"`
-	DefaultPermissions types.Map    `tfsdk:"default_permissions"`
-	AllowSelfRegister  types.Bool   `tfsdk:"allow_self_register"`
-	PermissionCount    types.Int64  `tfsdk:"permission_count"`
+	ID                 types.String       `tfsdk:"id"`
+	Scope              types.String       `tfsdk:"scope"`
+	Triggers           types.Map          `tfsdk:"triggers"`
+	DefaultPermissions types.Map          `tfsdk:"default_permissions"`
+	AllowSelfRegister  types.Bool         `tfsdk:"allow_self_register"`
+	CompanyModel       *CompanyModelModel `tfsdk:"company_model"`
+	PermissionCount    types.Int64        `tfsdk:"permission_count"`
+}
+
+// CompanyModelModel is the Terraform representation of the scope's companyModel.
+type CompanyModelModel struct {
+	Strategy           types.String             `tfsdk:"strategy"`
+	AssociatedAccounts *AssociatedAccountsModel `tfsdk:"associated_accounts"`
+}
+
+// AssociatedAccountsModel describes how a single contact's linked accounts resolve.
+type AssociatedAccountsModel struct {
+	Relationship     types.String `tfsdk:"relationship"`
+	AccountIDField   types.String `tfsdk:"account_id_field"`
+	AccountNameField types.String `tfsdk:"account_name_field"`
+	FetchXML         types.String `tfsdk:"fetch_xml"`
 }
 
 func NewPermissionsSyncResource() resource.Resource {
@@ -78,6 +93,43 @@ func (r *PermissionsSyncResource) Schema(_ context.Context, _ resource.SchemaReq
 					"in the scope's defaults.json. Defaults to false.",
 				Optional: true,
 			},
+			"company_model": schema.SingleNestedAttribute{
+				Description: "How this scope resolves a person to the companies they may act as. " +
+					"Omit for the classic parent-account (multi-contact) model. Published as " +
+					"`companyModel` in the scope's defaults.json.",
+				Optional: true,
+				Attributes: map[string]schema.Attribute{
+					"strategy": schema.StringAttribute{
+						Description: "\"parent-account\" (one Dataverse contact per company) or " +
+							"\"associated-accounts\" (one contact linked to several companies).",
+						Required: true,
+					},
+					"associated_accounts": schema.SingleNestedAttribute{
+						Description: "Required when strategy is \"associated-accounts\": how the single " +
+							"contact's linked accounts resolve. Supply a relationship or fetch_xml.",
+						Optional: true,
+						Attributes: map[string]schema.Attribute{
+							"relationship": schema.StringAttribute{
+								Description: "N:N relationship / collection-nav on contact yielding the linked account rows.",
+								Optional:    true,
+							},
+							"account_id_field": schema.StringAttribute{
+								Description: "Account primary-key attribute to read. Defaults to accountid.",
+								Optional:    true,
+							},
+							"account_name_field": schema.StringAttribute{
+								Description: "Account display-name attribute to read. Defaults to name.",
+								Optional:    true,
+							},
+							"fetch_xml": schema.StringAttribute{
+								Description: "Raw FetchXML returning linked account rows (supports {{contactid}}). " +
+									"Takes precedence over relationship.",
+								Optional: true,
+							},
+						},
+					},
+				},
+			},
 			"permission_count": schema.Int64Attribute{
 				Description: "The number of routes with published baseline permissions.",
 				Computed:    true,
@@ -122,6 +174,24 @@ func buildPermissions(ctx context.Context, m types.Map) (map[string][]string, er
 	return permissions, nil
 }
 
+// buildCompanyModel converts the company_model attribute into the client shape,
+// or nil for the classic parent-account model (attribute omitted).
+func buildCompanyModel(m *CompanyModelModel) *client.CompanyModel {
+	if m == nil {
+		return nil
+	}
+	cm := &client.CompanyModel{Strategy: m.Strategy.ValueString()}
+	if m.AssociatedAccounts != nil {
+		cm.AssociatedAccounts = &client.AssociatedAccountsQuery{
+			Relationship:     m.AssociatedAccounts.Relationship.ValueString(),
+			AccountIDField:   m.AssociatedAccounts.AccountIDField.ValueString(),
+			AccountNameField: m.AssociatedAccounts.AccountNameField.ValueString(),
+			FetchXML:         m.AssociatedAccounts.FetchXML.ValueString(),
+		}
+	}
+	return cm
+}
+
 func (r *PermissionsSyncResource) publish(ctx context.Context, plan *PermissionsSyncResourceModel, resp *diagnosticsSink) {
 	scope := plan.Scope.ValueString()
 
@@ -132,14 +202,16 @@ func (r *PermissionsSyncResource) publish(ctx context.Context, plan *Permissions
 	}
 
 	allowSelfRegister := plan.AllowSelfRegister.ValueBool()
+	companyModel := buildCompanyModel(plan.CompanyModel)
 
 	tflog.Info(ctx, "Publishing scope default permissions", map[string]interface{}{
 		"scope":               scope,
 		"routes":              len(permissions),
 		"allow_self_register": allowSelfRegister,
+		"company_model":       companyModel != nil,
 	})
 
-	if _, err := r.client.PublishDefaults(ctx, scope, permissions, allowSelfRegister); err != nil {
+	if _, err := r.client.PublishDefaults(ctx, scope, permissions, allowSelfRegister, companyModel); err != nil {
 		resp.AddError("Failed to publish permissions", err.Error())
 		return
 	}
