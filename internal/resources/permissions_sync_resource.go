@@ -23,13 +23,14 @@ type PermissionsSyncResource struct {
 
 // PermissionsSyncResourceModel describes the resource data model.
 type PermissionsSyncResourceModel struct {
-	ID                 types.String       `tfsdk:"id"`
-	Scope              types.String       `tfsdk:"scope"`
-	Triggers           types.Map          `tfsdk:"triggers"`
-	DefaultPermissions types.Map          `tfsdk:"default_permissions"`
-	AllowSelfRegister  types.Bool         `tfsdk:"allow_self_register"`
-	CompanyModel       *CompanyModelModel `tfsdk:"company_model"`
-	PermissionCount    types.Int64        `tfsdk:"permission_count"`
+	ID                   types.String               `tfsdk:"id"`
+	Scope                types.String               `tfsdk:"scope"`
+	Triggers             types.Map                  `tfsdk:"triggers"`
+	DefaultPermissions   types.Map                  `tfsdk:"default_permissions"`
+	AllowSelfRegister    types.Bool                 `tfsdk:"allow_self_register"`
+	CompanyModel         *CompanyModelModel         `tfsdk:"company_model"`
+	SelfRegisterAutoLink *SelfRegisterAutoLinkModel `tfsdk:"self_register_auto_link"`
+	PermissionCount      types.Int64                `tfsdk:"permission_count"`
 }
 
 // CompanyModelModel is the Terraform representation of the scope's companyModel.
@@ -44,6 +45,12 @@ type AssociatedAccountsModel struct {
 	AccountIDField   types.String `tfsdk:"account_id_field"`
 	AccountNameField types.String `tfsdk:"account_name_field"`
 	FetchXML         types.String `tfsdk:"fetch_xml"`
+}
+
+// SelfRegisterAutoLinkModel is the Terraform representation of the scope's
+// selfRegisterAutoLink config (domain-based company auto-linking).
+type SelfRegisterAutoLinkModel struct {
+	AccountField types.String `tfsdk:"account_field"`
 }
 
 func NewPermissionsSyncResource() resource.Resource {
@@ -130,6 +137,22 @@ func (r *PermissionsSyncResource) Schema(_ context.Context, _ resource.SchemaReq
 					},
 				},
 			},
+			"self_register_auto_link": schema.SingleNestedAttribute{
+				Description: "Domain-based company auto-linking for newly provisioned contacts. " +
+					"Published as `selfRegisterAutoLink` in the scope's defaults.json; presence enables " +
+					"the feature. When a contact is created (self-registration or the create_contact " +
+					"admin tool) and the email's domain appears in exactly one active account's " +
+					"account_field column, the contact is linked to that company. Fail-open: no match, " +
+					"an ambiguous domain, or a missing column registers the contact unlinked.",
+				Optional: true,
+				Attributes: map[string]schema.Attribute{
+					"account_field": schema.StringAttribute{
+						Description: "Logical name of the account text column holding the company's " +
+							"email-domain list (comma/semicolon/whitespace separated, e.g. \"acme.com, acme.co.uk\").",
+						Required: true,
+					},
+				},
+			},
 			"permission_count": schema.Int64Attribute{
 				Description: "The number of routes with published baseline permissions.",
 				Computed:    true,
@@ -192,6 +215,15 @@ func buildCompanyModel(m *CompanyModelModel) *client.CompanyModel {
 	return cm
 }
 
+// buildSelfRegisterAutoLink converts the self_register_auto_link attribute
+// into the client shape, or nil when the attribute is omitted (disabled).
+func buildSelfRegisterAutoLink(m *SelfRegisterAutoLinkModel) *client.SelfRegisterAutoLink {
+	if m == nil {
+		return nil
+	}
+	return &client.SelfRegisterAutoLink{AccountField: m.AccountField.ValueString()}
+}
+
 func (r *PermissionsSyncResource) publish(ctx context.Context, plan *PermissionsSyncResourceModel, resp *diagnosticsSink) {
 	scope := plan.Scope.ValueString()
 
@@ -203,15 +235,17 @@ func (r *PermissionsSyncResource) publish(ctx context.Context, plan *Permissions
 
 	allowSelfRegister := plan.AllowSelfRegister.ValueBool()
 	companyModel := buildCompanyModel(plan.CompanyModel)
+	selfRegisterAutoLink := buildSelfRegisterAutoLink(plan.SelfRegisterAutoLink)
 
 	tflog.Info(ctx, "Publishing scope default permissions", map[string]interface{}{
-		"scope":               scope,
-		"routes":              len(permissions),
-		"allow_self_register": allowSelfRegister,
-		"company_model":       companyModel != nil,
+		"scope":                   scope,
+		"routes":                  len(permissions),
+		"allow_self_register":     allowSelfRegister,
+		"company_model":           companyModel != nil,
+		"self_register_auto_link": selfRegisterAutoLink != nil,
 	})
 
-	if _, err := r.client.PublishDefaults(ctx, scope, permissions, allowSelfRegister, companyModel); err != nil {
+	if _, err := r.client.PublishDefaults(ctx, scope, permissions, allowSelfRegister, companyModel, selfRegisterAutoLink); err != nil {
 		resp.AddError("Failed to publish permissions", err.Error())
 		return
 	}

@@ -23,7 +23,7 @@ func TestPublishDefaults(t *testing.T) {
 
 	c := NewClient(server.URL, "key")
 	perms := map[string][]string{"case": {"team", "write", "create"}}
-	resp, err := c.PublishDefaults(context.Background(), "default", perms, true, nil)
+	resp, err := c.PublishDefaults(context.Background(), "default", perms, true, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestPublishDefaultsCompanyModel(t *testing.T) {
 		Strategy:           "associated-accounts",
 		AssociatedAccounts: &AssociatedAccountsQuery{Relationship: "cr_contact_accounts"},
 	}
-	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, cm); err != nil {
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, cm, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -90,11 +90,38 @@ func TestPublishDefaultsNilPermissions(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient(server.URL, "key")
-	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil); err != nil {
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if _, ok := gotBody["permissions"]; !ok {
 		t.Errorf("expected permissions key to be present even when nil")
+	}
+	if _, ok := gotBody["selfRegisterAutoLink"]; ok {
+		t.Errorf("expected selfRegisterAutoLink to be omitted when nil")
+	}
+}
+
+func TestPublishDefaultsSelfRegisterAutoLink(t *testing.T) {
+	var gotBody PublishDefaultsRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "key")
+	al := &SelfRegisterAutoLink{AccountField: "tn_emaildomains"}
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, true, nil, al); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotBody.SelfRegisterAutoLink == nil {
+		t.Fatalf("expected selfRegisterAutoLink in request body")
+	}
+	if gotBody.SelfRegisterAutoLink.AccountField != "tn_emaildomains" {
+		t.Errorf("unexpected accountField: %s", gotBody.SelfRegisterAutoLink.AccountField)
 	}
 }

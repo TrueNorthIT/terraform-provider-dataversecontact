@@ -11,6 +11,13 @@ resource "dataversecontact_permissions_sync" "default" {
   # Enable self-registration for citizen-facing scopes (optional, defaults to false).
   allow_self_register = false
 
+  # Optional: auto-link newly provisioned contacts to their company by email
+  # domain. account_field names an account text column holding the company's
+  # email-domain list (e.g. "acme.com, acme.co.uk"). Omit to disable.
+  # self_register_auto_link = {
+  #   account_field = "tn_emaildomains"
+  # }
+
   triggers = {
     tables_hash = sha256(join(",", [
       dataversecontact_table.case.id,

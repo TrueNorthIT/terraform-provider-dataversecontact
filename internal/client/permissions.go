@@ -13,15 +13,18 @@ import (
 // {"case": ["team", "write", "create"]}). allowSelfRegister toggles
 // self-registration for citizen-facing scopes. companyModel is optional —
 // nil publishes the classic parent-account (multi-contact) model.
-func (c *Client) PublishDefaults(ctx context.Context, scope string, permissions map[string][]string, allowSelfRegister bool, companyModel *CompanyModel) (*PublishDefaultsResponse, error) {
+// selfRegisterAutoLink is optional — non-nil enables domain-based company
+// auto-linking for newly provisioned contacts.
+func (c *Client) PublishDefaults(ctx context.Context, scope string, permissions map[string][]string, allowSelfRegister bool, companyModel *CompanyModel, selfRegisterAutoLink *SelfRegisterAutoLink) (*PublishDefaultsResponse, error) {
 	url := c.adminURL(scope, "table-manager/defaults")
 	if permissions == nil {
 		permissions = map[string][]string{}
 	}
 	body := PublishDefaultsRequest{
-		Permissions:       permissions,
-		AllowSelfRegister: allowSelfRegister,
-		CompanyModel:      companyModel,
+		Permissions:          permissions,
+		AllowSelfRegister:    allowSelfRegister,
+		CompanyModel:         companyModel,
+		SelfRegisterAutoLink: selfRegisterAutoLink,
 	}
 	var resp PublishDefaultsResponse
 	if err := c.doJSON(ctx, "PUT", url, body, &resp); err != nil {

@@ -175,9 +175,10 @@ type CustomApiRemoveResponse struct {
 // PublishDefaultsRequest is the request body for PUT /table-manager/defaults.
 // It mirrors the shape of a scope's defaults.json.
 type PublishDefaultsRequest struct {
-	Permissions       map[string][]string `json:"permissions"`
-	AllowSelfRegister bool                `json:"allowSelfRegister"`
-	CompanyModel      *CompanyModel       `json:"companyModel,omitempty"`
+	Permissions          map[string][]string   `json:"permissions"`
+	AllowSelfRegister    bool                  `json:"allowSelfRegister"`
+	CompanyModel         *CompanyModel         `json:"companyModel,omitempty"`
+	SelfRegisterAutoLink *SelfRegisterAutoLink `json:"selfRegisterAutoLink,omitempty"`
 }
 
 // CompanyModel mirrors the API's per-scope companyModel config. Omitted (nil)
@@ -195,6 +196,14 @@ type AssociatedAccountsQuery struct {
 	AccountIDField   string `json:"accountIdField,omitempty"`
 	AccountNameField string `json:"accountNameField,omitempty"`
 	FetchXML         string `json:"fetchXml,omitempty"`
+}
+
+// SelfRegisterAutoLink mirrors the API's per-scope selfRegisterAutoLink
+// config. Presence enables domain-based company auto-linking when a contact
+// is provisioned: AccountField names the account text column holding the
+// company's email-domain list.
+type SelfRegisterAutoLink struct {
+	AccountField string `json:"accountField"`
 }
 
 // PublishDefaultsResponse is the response from PUT /table-manager/defaults.
