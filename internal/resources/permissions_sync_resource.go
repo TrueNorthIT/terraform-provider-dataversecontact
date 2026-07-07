@@ -29,7 +29,15 @@ type PermissionsSyncResourceModel struct {
 	DefaultPermissions types.Map          `tfsdk:"default_permissions"`
 	AllowSelfRegister  types.Bool         `tfsdk:"allow_self_register"`
 	CompanyModel       *CompanyModelModel `tfsdk:"company_model"`
+	Join               *JoinModel         `tfsdk:"join"`
 	PermissionCount    types.Int64        `tfsdk:"permission_count"`
+}
+
+// JoinModel is the Terraform representation of the scope's self-serve join config.
+type JoinModel struct {
+	Strategy     types.String `tfsdk:"strategy"`
+	DomainField  types.String `tfsdk:"domain_field"`
+	RequireMatch types.Bool   `tfsdk:"require_match"`
 }
 
 // CompanyModelModel is the Terraform representation of the scope's companyModel.
@@ -130,6 +138,30 @@ func (r *PermissionsSyncResource) Schema(_ context.Context, _ resource.SchemaReq
 					},
 				},
 			},
+			"join": schema.SingleNestedAttribute{
+				Description: "How a signed-in caller with no Dataverse contact yet may self-join companies. " +
+					"Omit to just provision an unlinked contact for an officer to link. Published as " +
+					"`join` in the scope's defaults.json.",
+				Optional: true,
+				Attributes: map[string]schema.Attribute{
+					"strategy": schema.StringAttribute{
+						Description: "Join strategy. Currently only \"domain-list\" — match the caller's verified " +
+							"email domain against a per-company account field.",
+						Required: true,
+					},
+					"domain_field": schema.StringAttribute{
+						Description: "For \"domain-list\": the account column listing the email domains allowed to " +
+							"join that company (space/comma/semicolon separated), e.g. \"new_portaldomains\". " +
+							"A company lists its own domain(s) plus any staff domain.",
+						Required: true,
+					},
+					"require_match": schema.BoolAttribute{
+						Description: "When true, a caller whose email domain matches no company is blocked from " +
+							"registering (rather than getting an unlinked contact). Defaults to false.",
+						Optional: true,
+					},
+				},
+			},
 			"permission_count": schema.Int64Attribute{
 				Description: "The number of routes with published baseline permissions.",
 				Computed:    true,
@@ -192,6 +224,19 @@ func buildCompanyModel(m *CompanyModelModel) *client.CompanyModel {
 	return cm
 }
 
+// buildJoin converts the join attribute into the client shape, or nil when the
+// scope declares no self-serve join strategy (attribute omitted).
+func buildJoin(m *JoinModel) *client.JoinConfig {
+	if m == nil {
+		return nil
+	}
+	return &client.JoinConfig{
+		Strategy:     m.Strategy.ValueString(),
+		DomainField:  m.DomainField.ValueString(),
+		RequireMatch: m.RequireMatch.ValueBool(),
+	}
+}
+
 func (r *PermissionsSyncResource) publish(ctx context.Context, plan *PermissionsSyncResourceModel, resp *diagnosticsSink) {
 	scope := plan.Scope.ValueString()
 
@@ -203,15 +248,17 @@ func (r *PermissionsSyncResource) publish(ctx context.Context, plan *Permissions
 
 	allowSelfRegister := plan.AllowSelfRegister.ValueBool()
 	companyModel := buildCompanyModel(plan.CompanyModel)
+	join := buildJoin(plan.Join)
 
 	tflog.Info(ctx, "Publishing scope default permissions", map[string]interface{}{
 		"scope":               scope,
 		"routes":              len(permissions),
 		"allow_self_register": allowSelfRegister,
 		"company_model":       companyModel != nil,
+		"join":                join != nil,
 	})
 
-	if _, err := r.client.PublishDefaults(ctx, scope, permissions, allowSelfRegister, companyModel); err != nil {
+	if _, err := r.client.PublishDefaults(ctx, scope, permissions, allowSelfRegister, companyModel, join); err != nil {
 		resp.AddError("Failed to publish permissions", err.Error())
 		return
 	}

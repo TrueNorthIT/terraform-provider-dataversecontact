@@ -23,7 +23,7 @@ func TestPublishDefaults(t *testing.T) {
 
 	c := NewClient(server.URL, "key")
 	perms := map[string][]string{"case": {"team", "write", "create"}}
-	resp, err := c.PublishDefaults(context.Background(), "default", perms, true, nil)
+	resp, err := c.PublishDefaults(context.Background(), "default", perms, true, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestPublishDefaultsCompanyModel(t *testing.T) {
 		Strategy:           "associated-accounts",
 		AssociatedAccounts: &AssociatedAccountsQuery{Relationship: "cr_contact_accounts"},
 	}
-	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, cm); err != nil {
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, cm, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -79,6 +79,36 @@ func TestPublishDefaultsCompanyModel(t *testing.T) {
 	}
 }
 
+func TestPublishDefaultsJoin(t *testing.T) {
+	var gotBody PublishDefaultsRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "key")
+	join := &JoinConfig{Strategy: "domain-list", DomainField: "new_portaldomains", RequireMatch: true}
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, true, nil, join); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotBody.Join == nil {
+		t.Fatalf("expected join in request body")
+	}
+	if gotBody.Join.Strategy != "domain-list" {
+		t.Errorf("unexpected strategy: %s", gotBody.Join.Strategy)
+	}
+	if gotBody.Join.DomainField != "new_portaldomains" {
+		t.Errorf("unexpected domainField: %s", gotBody.Join.DomainField)
+	}
+	if !gotBody.Join.RequireMatch {
+		t.Errorf("expected requireMatch true")
+	}
+}
+
 func TestPublishDefaultsNilPermissions(t *testing.T) {
 	var gotBody map[string]json.RawMessage
 
@@ -90,7 +120,7 @@ func TestPublishDefaultsNilPermissions(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient(server.URL, "key")
-	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil); err != nil {
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 

@@ -12,8 +12,9 @@ import (
 // granted to every authenticated contact for that route (e.g.
 // {"case": ["team", "write", "create"]}). allowSelfRegister toggles
 // self-registration for citizen-facing scopes. companyModel is optional —
-// nil publishes the classic parent-account (multi-contact) model.
-func (c *Client) PublishDefaults(ctx context.Context, scope string, permissions map[string][]string, allowSelfRegister bool, companyModel *CompanyModel) (*PublishDefaultsResponse, error) {
+// nil publishes the classic parent-account (multi-contact) model. join is
+// optional — nil means registration just provisions an unlinked contact.
+func (c *Client) PublishDefaults(ctx context.Context, scope string, permissions map[string][]string, allowSelfRegister bool, companyModel *CompanyModel, join *JoinConfig) (*PublishDefaultsResponse, error) {
 	url := c.adminURL(scope, "table-manager/defaults")
 	if permissions == nil {
 		permissions = map[string][]string{}
@@ -22,6 +23,7 @@ func (c *Client) PublishDefaults(ctx context.Context, scope string, permissions 
 		Permissions:       permissions,
 		AllowSelfRegister: allowSelfRegister,
 		CompanyModel:      companyModel,
+		Join:              join,
 	}
 	var resp PublishDefaultsResponse
 	if err := c.doJSON(ctx, "PUT", url, body, &resp); err != nil {
