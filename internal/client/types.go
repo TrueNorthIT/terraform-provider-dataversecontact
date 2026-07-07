@@ -178,6 +178,18 @@ type PublishDefaultsRequest struct {
 	Permissions       map[string][]string `json:"permissions"`
 	AllowSelfRegister bool                `json:"allowSelfRegister"`
 	CompanyModel      *CompanyModel       `json:"companyModel,omitempty"`
+	Join              *JoinConfig         `json:"join,omitempty"`
+}
+
+// JoinConfig mirrors the API's per-scope self-serve join config. Omitted (nil)
+// means registration just provisions an unlinked contact.
+type JoinConfig struct {
+	// Currently only "domain-list".
+	Strategy string `json:"strategy"`
+	// The account column listing the email domains allowed to join a company.
+	DomainField string `json:"domainField,omitempty"`
+	// When true, a caller whose domain matches no company is blocked from registering.
+	RequireMatch bool `json:"requireMatch,omitempty"`
 }
 
 // CompanyModel mirrors the API's per-scope companyModel config. Omitted (nil)
