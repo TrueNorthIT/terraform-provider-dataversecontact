@@ -64,12 +64,12 @@ type TableResourceModel struct {
 	Fields types.Map `tfsdk:"fields"`
 
 	// Blocks
-	ContactJoinStep          []JoinStepModel                    `tfsdk:"contact_join_step"`
-	TeamJoinStep             []JoinStepModel                    `tfsdk:"team_join_step"`
-	AlternateContactJoinPath []AlternateContactJoinPathModel    `tfsdk:"alternate_contact_join_path"`
-	CreateDefault            []CreateDefaultModel               `tfsdk:"create_default"`
-	ParentTable              *ParentTableModel                  `tfsdk:"parent_table"`
-	Expand                   []ExpandModel                      `tfsdk:"expand"`
+	ContactJoinStep          []JoinStepModel                 `tfsdk:"contact_join_step"`
+	TeamJoinStep             []JoinStepModel                 `tfsdk:"team_join_step"`
+	AlternateContactJoinPath []AlternateContactJoinPathModel `tfsdk:"alternate_contact_join_path"`
+	CreateDefault            []CreateDefaultModel            `tfsdk:"create_default"`
+	ParentTable              *ParentTableModel               `tfsdk:"parent_table"`
+	Expand                   []ExpandModel                   `tfsdk:"expand"`
 
 	// Computed
 	Source     types.String `tfsdk:"source"`
@@ -78,9 +78,10 @@ type TableResourceModel struct {
 
 // JoinStepModel represents a single step in a join path.
 type JoinStepModel struct {
-	Table types.String `tfsdk:"table"`
-	From  types.String `tfsdk:"from"`
-	Key   types.String `tfsdk:"key"`
+	Table   types.String `tfsdk:"table"`
+	From    types.String `tfsdk:"from"`
+	Key     types.String `tfsdk:"key"`
+	Reverse types.Bool   `tfsdk:"reverse"`
 }
 
 // AlternateContactJoinPathModel is a single alternate path with nested steps.
@@ -140,6 +141,12 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				"key": schema.StringAttribute{
 					Description: "Primary key field on the target table.",
 					Required:    true,
+				},
+				"reverse": schema.BoolAttribute{
+					Description: "If true, `from` is a collection-valued navigation property; this " +
+						"step compiles to an OData any() lambda that scopes an ownerless child " +
+						"through the parent that references it (e.g. booking via servicebooking).",
+					Optional: true,
 				},
 			},
 		},
@@ -325,25 +332,11 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Description: "Additional join paths to the contact (OR'd with contact_join_step).",
 				NestedObject: schema.NestedBlockObject{
 					Blocks: map[string]schema.Block{
-						"step": schema.ListNestedBlock{
-							Description: "Steps in this alternate path (ordered).",
-							NestedObject: schema.NestedBlockObject{
-								Attributes: map[string]schema.Attribute{
-									"table": schema.StringAttribute{
-										Description: "Dataverse table name for this step.",
-										Required:    true,
-									},
-									"from": schema.StringAttribute{
-										Description: "Navigation property or lookup field to follow.",
-										Required:    true,
-									},
-									"key": schema.StringAttribute{
-										Description: "Primary key field on the target table.",
-										Required:    true,
-									},
-								},
-							},
-						},
+						"step": func() schema.Block {
+							b := joinStepBlock
+							b.Description = "Steps in this alternate path (ordered)."
+							return b
+						}(),
 					},
 				},
 			},

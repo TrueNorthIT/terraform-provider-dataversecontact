@@ -15,37 +15,38 @@ import (
 
 // SchemaHintJSON is the top-level JSON blob sent to / received from the API.
 type SchemaHintJSON struct {
-	RouteName              string                       `json:"routeName"`
-	Description            string                       `json:"description,omitempty"`
-	Icon                   string                       `json:"icon,omitempty"`
-	DataverseTable         string                       `json:"dataverseTable"`
-	DataverseLogicalName   string                       `json:"dataverseLogicalName"`
-	RequiredPermission     string                       `json:"requiredPermission"`
-	PrimaryKey             string                       `json:"primaryKey"`
-	Aliases                []string                     `json:"aliases,omitempty"`
-	DefaultSelect          []string                     `json:"defaultSelect"`
-	ContactJoinPath        []JoinStepJSON               `json:"contactJoinPath,omitempty"`
-	AlternateContactJoinPaths [][]JoinStepJSON          `json:"alternateContactJoinPaths,omitempty"`
-	TeamJoinPath           []JoinStepJSON               `json:"teamJoinPath,omitempty"`
-	CreateDefaults         []CreateDefaultJSON          `json:"createDefaults,omitempty"`
-	LookupFields           []string                     `json:"lookupFields"`
-	LookupSearchContains   []string                     `json:"lookupSearchContains,omitempty"`
-	Filters                []string                     `json:"filters,omitempty"`
-	ParentTable            *ParentTableJSON             `json:"parentTable,omitempty"`
-	Expands                []ExpandJSON                 `json:"expands,omitempty"`
-	PublicChoices          *bool                        `json:"publicChoices,omitempty"`
-	PublicRead             *bool                        `json:"publicRead,omitempty"`
-	PublicCreate           *bool                        `json:"publicCreate,omitempty"`
-	PermissionGroup        string                       `json:"permissionGroup,omitempty"`
-	FetchXml               string                       `json:"fetchXml,omitempty"`
-	Fields                 map[string]FieldHintJSON     `json:"fields"`
+	RouteName                 string                   `json:"routeName"`
+	Description               string                   `json:"description,omitempty"`
+	Icon                      string                   `json:"icon,omitempty"`
+	DataverseTable            string                   `json:"dataverseTable"`
+	DataverseLogicalName      string                   `json:"dataverseLogicalName"`
+	RequiredPermission        string                   `json:"requiredPermission"`
+	PrimaryKey                string                   `json:"primaryKey"`
+	Aliases                   []string                 `json:"aliases,omitempty"`
+	DefaultSelect             []string                 `json:"defaultSelect"`
+	ContactJoinPath           []JoinStepJSON           `json:"contactJoinPath,omitempty"`
+	AlternateContactJoinPaths [][]JoinStepJSON         `json:"alternateContactJoinPaths,omitempty"`
+	TeamJoinPath              []JoinStepJSON           `json:"teamJoinPath,omitempty"`
+	CreateDefaults            []CreateDefaultJSON      `json:"createDefaults,omitempty"`
+	LookupFields              []string                 `json:"lookupFields"`
+	LookupSearchContains      []string                 `json:"lookupSearchContains,omitempty"`
+	Filters                   []string                 `json:"filters,omitempty"`
+	ParentTable               *ParentTableJSON         `json:"parentTable,omitempty"`
+	Expands                   []ExpandJSON             `json:"expands,omitempty"`
+	PublicChoices             *bool                    `json:"publicChoices,omitempty"`
+	PublicRead                *bool                    `json:"publicRead,omitempty"`
+	PublicCreate              *bool                    `json:"publicCreate,omitempty"`
+	PermissionGroup           string                   `json:"permissionGroup,omitempty"`
+	FetchXml                  string                   `json:"fetchXml,omitempty"`
+	Fields                    map[string]FieldHintJSON `json:"fields"`
 }
 
 // JoinStepJSON is a single step in a contact/team join path.
 type JoinStepJSON struct {
-	Table string `json:"table"`
-	From  string `json:"from"`
-	Key   string `json:"key"`
+	Table   string `json:"table"`
+	From    string `json:"from"`
+	Key     string `json:"key"`
+	Reverse bool   `json:"reverse,omitempty"`
 }
 
 // CreateDefaultJSON is a lookup field auto-bound on create.
@@ -63,9 +64,9 @@ type ParentTableJSON struct {
 
 // ExpandJSON is an expandable lookup into a related table.
 type ExpandJSON struct {
-	LookupField  string              `json:"lookupField"`
-	RelatedTable string              `json:"relatedTable"`
-	Fields       []ExpandFieldJSON   `json:"fields"`
+	LookupField  string            `json:"lookupField"`
+	RelatedTable string            `json:"relatedTable"`
+	Fields       []ExpandFieldJSON `json:"fields"`
 }
 
 // ExpandFieldJSON is a single field within an expand definition.
@@ -327,9 +328,10 @@ func joinStepsModelToJSON(ctx context.Context, steps []JoinStepModel, diags *dia
 	result := make([]JoinStepJSON, len(steps))
 	for i, s := range steps {
 		result[i] = JoinStepJSON{
-			Table: s.Table.ValueString(),
-			From:  s.From.ValueString(),
-			Key:   s.Key.ValueString(),
+			Table:   s.Table.ValueString(),
+			From:    s.From.ValueString(),
+			Key:     s.Key.ValueString(),
+			Reverse: s.Reverse.ValueBool(),
 		}
 	}
 	return result
@@ -342,9 +344,10 @@ func joinStepsJSONToModel(steps []JoinStepJSON) []JoinStepModel {
 	result := make([]JoinStepModel, len(steps))
 	for i, s := range steps {
 		result[i] = JoinStepModel{
-			Table: types.StringValue(s.Table),
-			From:  types.StringValue(s.From),
-			Key:   types.StringValue(s.Key),
+			Table:   types.StringValue(s.Table),
+			From:    types.StringValue(s.From),
+			Key:     types.StringValue(s.Key),
+			Reverse: boolOrNull(s.Reverse),
 		}
 	}
 	return result
@@ -361,9 +364,10 @@ func alternateJoinPathsModelToJSON(ctx context.Context, paths []AlternateContact
 		steps := make([]JoinStepJSON, len(p.Step))
 		for j, s := range p.Step {
 			steps[j] = JoinStepJSON{
-				Table: s.Table.ValueString(),
-				From:  s.From.ValueString(),
-				Key:   s.Key.ValueString(),
+				Table:   s.Table.ValueString(),
+				From:    s.From.ValueString(),
+				Key:     s.Key.ValueString(),
+				Reverse: s.Reverse.ValueBool(),
 			}
 		}
 		result[i] = steps
@@ -380,9 +384,10 @@ func alternateJoinPathsJSONToModel(paths [][]JoinStepJSON) []AlternateContactJoi
 		steps := make([]JoinStepModel, len(p))
 		for j, s := range p {
 			steps[j] = JoinStepModel{
-				Table: types.StringValue(s.Table),
-				From:  types.StringValue(s.From),
-				Key:   types.StringValue(s.Key),
+				Table:   types.StringValue(s.Table),
+				From:    types.StringValue(s.From),
+				Key:     types.StringValue(s.Key),
+				Reverse: boolOrNull(s.Reverse),
 			}
 		}
 		result[i] = AlternateContactJoinPathModel{Step: steps}
