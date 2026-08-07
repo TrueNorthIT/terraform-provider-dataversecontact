@@ -2,34 +2,56 @@
 
 ## What it does — user, customer & business value
 
-This is a custom Terraform provider (`tnapps/dataversecontact`) that lets teams define a local authority's citizen-facing API surface as code. The Contact Portal API sits in front of Microsoft Dataverse and only exposes the tables, fields and custom actions that have been explicitly configured for it. This provider manages that configuration: which Dataverse tables are published to the API, which fields citizens or staff can read and write, which Dataverse Custom APIs (e.g. calendar/availability functions) are callable, and which Auth0 permissions exist for each scope.
+This is a custom Terraform provider (`TrueNorthIT/dataversecontact`) that lets teams define a local authority's citizen-facing API surface as code. The Contact Portal API sits in front of Microsoft Dataverse and only exposes the tables, fields and custom actions that have been explicitly configured for it. This provider manages that configuration: which Dataverse tables are published to the API, which fields citizens or staff can read and write, which Dataverse Custom APIs (e.g. calendar/availability functions) are callable, and the baseline permissions every authenticated caller gets in each scope.
 
 Its users are developers and platform engineers at TrueNorth IT or at a council, not citizens directly. The value it delivers is repeatability and safety: instead of hand-configuring API table definitions through an admin UI for every council, environment or pilot, a whole portal backend (e.g. a citizen booking service) can be provisioned with `terraform apply`, reviewed in version control, reproduced in a new environment in minutes, and torn down cleanly. That dramatically lowers the cost of standing up new citizen services and keeps environments consistent — a key enabler for offering the LA Stack to multiple authorities.
 
 ## Architecture overview
 
-- **Language/stack:** Go 1.24, HashiCorp Terraform Plugin Framework (v1.16), distributed as `registry.terraform.io/tnapps/dataversecontact`.
+- **Language/stack:** Go 1.24, HashiCorp Terraform Plugin Framework (v1.16), distributed as `registry.terraform.io/TrueNorthIT/dataversecontact`.
 - **`internal/provider`** — provider definition and configuration (API URL plus credentials).
-- **`internal/client`** — HTTP client for the Dataverse Contact API admin endpoints: table definitions, custom APIs, permission sync, and an Auth0 OAuth2 client-credentials token exchange (`auth0.go`).
+- **`internal/client`** — HTTP client for the Dataverse Contact API admin endpoints: table definitions, custom APIs and scope defaults.
 - **`internal/resources`** — Terraform resources:
   - `dataversecontact_table` — publishes a Dataverse table to the API (route name, fields, types, read-only flags, aliases, default select, expands/relationships, contact join paths, public read/create flags).
   - `dataversecontact_custom_api` — registers a Dataverse Custom API route from a JSON schema.
-  - `dataversecontact_permissions_sync` — syncs the resulting permission set to Auth0 for a scope.
+  - `dataversecontact_permissions_sync` — publishes the scope's **`defaults.json`**: the baseline permissions every authenticated caller gets. See the note below — the name is misleading.
 - **`internal/datasources`** — read-only data sources: `scopes`, `table`, `table_definitions`.
 - **`examples/`** — usage examples per resource/data source plus a full-scope example.
 
-Authentication supports two modes: Auth0 machine-to-machine (recommended — the provider exchanges client credentials for a token against the Auth0 tenant) or a static API key. All settings can come from environment variables (`DATAVERSE_CONTACT_API_URL`, `AUTH0_DOMAIN`, etc.).
+Authentication is the pre-shared admin connection key, sent as the admin Bearer token (`connection_key`, or `DATAVERSE_CONTACT_CONNECTION_KEY` via a runner script). One key administers every scope; it must be byte-identical to `ADMIN_CONNECTION_KEY` on the API deployment.
 
 ```
 Terraform config (.tf)
         │ plan/apply
         ▼
 terraform-provider-dataversecontact (Go)
-        │ 1. Auth0 M2M token exchange ──► Auth0
-        │ 2. Admin REST calls (Bearer)
+        │ Admin REST calls (Bearer: connection key)
         ▼
 Dataverse Contact API  ──►  Microsoft Dataverse (table metadata, custom APIs)
+                       └──►  Azure Blob (published/<scope>/… config + defaults.json)
 ```
+
+### `permissions_sync` does not sync anything to an IdP
+
+The name is left over from when the provider pushed a scope's permission set into
+Auth0 so it could be assigned there. **That code is gone** — there is no
+`auth0.go`, and no Auth0 call anywhere in the provider.
+
+Today the resource makes exactly one request: `PublishDefaults` →
+`PUT /api/v2/_admin/{scope}/table-manager/defaults` (`internal/client/permissions.go`),
+which writes `published/<scope>/defaults.json` to blob storage. That file is the
+**only** way a Terraform-provisioned scope declares baseline permissions, and it
+is very much live: the API merges it into table config at registry build
+(`defaultActions`) and `getDefaultPermissions(scope)` resolves it on every
+request, unioned with per-user `cr_apipermission` rows.
+
+So it is required, not vestigial. **A blob-only scope with no published
+`defaults.json` grants nothing** — every route answers
+`403 Missing required permission: <route>`, including reads, which is a
+confusing way to discover you left the resource out.
+
+Renaming it would be a breaking change to every consumer's state, so the name
+stays and this note exists instead.
 
 Built locally with the GNUmakefile (`go install`); during development a Terraform CLI `dev_overrides` entry points at the locally built binary.
 
