@@ -18,8 +18,8 @@ build:
 # Install provider locally for development
 .PHONY: install
 install: build
-	mkdir -p ~/.terraform.d/plugins/registry.terraform.io/tnapps/dataversecontact/0.0.1/$$(go env GOOS)_$$(go env GOARCH)
-	cp terraform-provider-dataversecontact ~/.terraform.d/plugins/registry.terraform.io/tnapps/dataversecontact/0.0.1/$$(go env GOOS)_$$(go env GOARCH)/
+	mkdir -p ~/.terraform.d/plugins/registry.terraform.io/TrueNorthIT/dataversecontact/0.0.1/$$(go env GOOS)_$$(go env GOARCH)
+	cp terraform-provider-dataversecontact ~/.terraform.d/plugins/registry.terraform.io/TrueNorthIT/dataversecontact/0.0.1/$$(go env GOOS)_$$(go env GOARCH)/
 
 # Generate documentation
 .PHONY: docs

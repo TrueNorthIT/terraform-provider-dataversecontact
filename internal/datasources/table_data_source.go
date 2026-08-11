@@ -9,7 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
-	"github.com/tnapps/terraform-provider-dataversecontact/internal/client"
+	"github.com/TrueNorthIT/terraform-provider-dataversecontact/internal/client"
 )
 
 var _ datasource.DataSource = &TableDataSource{}

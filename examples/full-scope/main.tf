@@ -1,7 +1,7 @@
 terraform {
   required_providers {
     dataversecontact = {
-      source = "tnapps/dataversecontact"
+      source = "TrueNorthIT/dataversecontact"
     }
   }
 }

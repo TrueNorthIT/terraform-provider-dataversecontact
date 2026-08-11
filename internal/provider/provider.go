@@ -11,9 +11,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
-	"github.com/tnapps/terraform-provider-dataversecontact/internal/client"
-	"github.com/tnapps/terraform-provider-dataversecontact/internal/datasources"
-	"github.com/tnapps/terraform-provider-dataversecontact/internal/resources"
+	"github.com/TrueNorthIT/terraform-provider-dataversecontact/internal/client"
+	"github.com/TrueNorthIT/terraform-provider-dataversecontact/internal/datasources"
+	"github.com/TrueNorthIT/terraform-provider-dataversecontact/internal/resources"
 )
 
 var _ provider.Provider = &DataverseContactProvider{}

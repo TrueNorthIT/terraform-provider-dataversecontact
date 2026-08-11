@@ -1,4 +1,4 @@
-module github.com/tnapps/terraform-provider-dataversecontact
+module github.com/TrueNorthIT/terraform-provider-dataversecontact
 
 go 1.24.0
 
