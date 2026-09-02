@@ -59,13 +59,24 @@ resource "dataversecontact_permissions_sync" "default" {
 
 ## Editor setup — autocomplete for everything
 
-Install the [HashiCorp Terraform](https://marketplace.visualstudio.com/items?itemName=HashiCorp.terraform)
-VS Code extension (or any editor running `terraform-ls`). After
-`terraform init` downloads the provider, the language server serves this
-provider's full schema: every attribute autocompletes, and every description
-in these docs appears on hover. No extra tooling needed — but note it depends
-on `init` resolving the provider from the registry, so pin a version and avoid
-`dev_overrides` outside provider development.
+Install the official [HashiCorp Terraform](https://marketplace.visualstudio.com/items?itemName=HashiCorp.terraform)
+VS Code extension — either:
+
+- in VS Code: **Extensions** view (`Ctrl+Shift+X`), search for
+  "HashiCorp Terraform", click **Install**; or
+- from a terminal:
+
+  ```sh
+  code --install-extension hashicorp.terraform
+  ```
+
+(Any editor running `terraform-ls` works the same way.) Then, in your
+Terraform repo, run `terraform init` once. That downloads the provider, and
+the language server serves its full schema from then on: every attribute
+autocompletes, and every description in these docs appears on hover. No extra
+tooling needed — but it depends on `init` resolving the provider from the
+registry, so pin a version and avoid `dev_overrides` outside provider
+development.
 
 > Migrating an older config off a local build? Change
 > `source = "tnapps/dataversecontact"` to `TrueNorthIT/dataversecontact`, run
