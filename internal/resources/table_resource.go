@@ -22,8 +22,9 @@ import (
 )
 
 var (
-	_ resource.Resource                = &TableResource{}
-	_ resource.ResourceWithImportState = &TableResource{}
+	_ resource.Resource                   = &TableResource{}
+	_ resource.ResourceWithImportState    = &TableResource{}
+	_ resource.ResourceWithValidateConfig = &TableResource{}
 )
 
 // TableResource defines the resource implementation.
@@ -286,8 +287,9 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"type": schema.StringAttribute{
-							Description: "Field data type.",
-							Required:    true,
+							Description: "Field data type: \"string\", \"number\", \"datetime\", " +
+								"\"boolean\", \"lookup\" or \"choice\".",
+							Required: true,
 							Validators: []validator.String{
 								fieldTypeValidator,
 							},
@@ -398,8 +400,9 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 										Required:    true,
 									},
 									"type": schema.StringAttribute{
-										Description: "Field data type.",
-										Required:    true,
+										Description: "Field data type: \"string\", \"number\", \"datetime\", " +
+											"\"boolean\", \"lookup\" or \"choice\".",
+										Required: true,
 										Validators: []validator.String{
 											fieldTypeValidator,
 										},
@@ -415,6 +418,61 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				},
 			},
 		},
+	}
+}
+
+// ValidateConfig catches cross-field mistakes the per-attribute validators
+// can't: a lookup field without its target table, and a half-filled
+// parent_table block (whose attributes must stay Optional because a
+// SingleNestedBlock's Required attributes error even when the block is omitted).
+func (r *TableResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var config TableResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if !config.Fields.IsNull() && !config.Fields.IsUnknown() {
+		for name, val := range config.Fields.Elements() {
+			obj, ok := val.(types.Object)
+			if !ok || obj.IsNull() || obj.IsUnknown() {
+				continue
+			}
+			attrs := obj.Attributes()
+			fieldType, _ := attrs["type"].(types.String)
+			lookupTable, _ := attrs["lookup_table"].(types.String)
+			if fieldType.IsNull() || fieldType.IsUnknown() {
+				continue
+			}
+			switch {
+			case fieldType.ValueString() == "lookup" && lookupTable.IsNull():
+				resp.Diagnostics.AddAttributeError(
+					path.Root("fields").AtMapKey(name).AtName("lookup_table"),
+					"Lookup field missing lookup_table",
+					fmt.Sprintf("Field %q has type \"lookup\" but no lookup_table. "+
+						"Set lookup_table to the route name of the table the lookup points at "+
+						"(e.g. \"contact\").", name),
+				)
+			case fieldType.ValueString() != "lookup" && !lookupTable.IsNull() && !lookupTable.IsUnknown():
+				resp.Diagnostics.AddAttributeWarning(
+					path.Root("fields").AtMapKey(name).AtName("lookup_table"),
+					"lookup_table set on a non-lookup field",
+					fmt.Sprintf("Field %q has type %q, so its lookup_table is ignored. "+
+						"Either set type = \"lookup\" or remove lookup_table.", name, fieldType.ValueString()),
+				)
+			}
+		}
+	}
+
+	if pt := config.ParentTable; pt != nil {
+		if pt.Table.IsNull() || pt.NavigationProperty.IsNull() {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("parent_table"),
+				"Incomplete parent_table block",
+				"A parent_table block needs both table (the parent's route name) and "+
+					"navigation_property (the OData navigation property from this table to the parent).",
+			)
+		}
 	}
 }
 

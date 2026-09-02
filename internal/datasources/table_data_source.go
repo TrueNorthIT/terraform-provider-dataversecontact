@@ -21,16 +21,16 @@ type TableDataSource struct {
 
 // TableDataSourceModel describes the data source data model.
 type TableDataSourceModel struct {
-	ID                  types.String `tfsdk:"id"`
-	Scope               types.String `tfsdk:"scope"`
-	RouteName           types.String `tfsdk:"route_name"`
-	Source              types.String `tfsdk:"source"`
-	SchemaJSON          types.String `tfsdk:"schema_json"`
-	DataverseTable      types.String `tfsdk:"dataverse_table"`
+	ID                   types.String `tfsdk:"id"`
+	Scope                types.String `tfsdk:"scope"`
+	RouteName            types.String `tfsdk:"route_name"`
+	Source               types.String `tfsdk:"source"`
+	SchemaJSON           types.String `tfsdk:"schema_json"`
+	DataverseTable       types.String `tfsdk:"dataverse_table"`
 	DataverseLogicalName types.String `tfsdk:"dataverse_logical_name"`
-	RequiredPermission  types.String `tfsdk:"required_permission"`
-	PrimaryKey          types.String `tfsdk:"primary_key"`
-	FieldCount          types.Int64  `tfsdk:"field_count"`
+	RequiredPermission   types.String `tfsdk:"required_permission"`
+	PrimaryKey           types.String `tfsdk:"primary_key"`
+	FieldCount           types.Int64  `tfsdk:"field_count"`
 }
 
 func NewTableDataSource() datasource.DataSource {

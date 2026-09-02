@@ -20,21 +20,21 @@ type TableDefinitionsDataSource struct {
 
 // TableDefinitionsDataSourceModel describes the data source data model.
 type TableDefinitionsDataSourceModel struct {
-	ID          types.String                    `tfsdk:"id"`
-	Scope       types.String                    `tfsdk:"scope"`
-	Definitions []TableDefinitionDataModel      `tfsdk:"definitions"`
+	ID          types.String               `tfsdk:"id"`
+	Scope       types.String               `tfsdk:"scope"`
+	Definitions []TableDefinitionDataModel `tfsdk:"definitions"`
 }
 
 // TableDefinitionDataModel describes a single table definition.
 type TableDefinitionDataModel struct {
-	RouteName           types.String `tfsdk:"route_name"`
-	Source              types.String `tfsdk:"source"`
-	Description         types.String `tfsdk:"description"`
-	DataverseTable      types.String `tfsdk:"dataverse_table"`
+	RouteName            types.String `tfsdk:"route_name"`
+	Source               types.String `tfsdk:"source"`
+	Description          types.String `tfsdk:"description"`
+	DataverseTable       types.String `tfsdk:"dataverse_table"`
 	DataverseLogicalName types.String `tfsdk:"dataverse_logical_name"`
-	RequiredPermission  types.String `tfsdk:"required_permission"`
-	PrimaryKey          types.String `tfsdk:"primary_key"`
-	FieldCount          types.Int64  `tfsdk:"field_count"`
+	RequiredPermission   types.String `tfsdk:"required_permission"`
+	PrimaryKey           types.String `tfsdk:"primary_key"`
+	FieldCount           types.Int64  `tfsdk:"field_count"`
 }
 
 func NewTableDefinitionsDataSource() datasource.DataSource {
@@ -134,14 +134,14 @@ func (d *TableDefinitionsDataSource) Read(ctx context.Context, req datasource.Re
 	definitions := make([]TableDefinitionDataModel, len(defsResp.Definitions))
 	for i, def := range defsResp.Definitions {
 		definitions[i] = TableDefinitionDataModel{
-			RouteName:           types.StringValue(def.RouteName),
-			Source:              types.StringValue(def.Source),
-			Description:         types.StringValue(def.Description),
-			DataverseTable:      types.StringValue(def.DataverseTable),
+			RouteName:            types.StringValue(def.RouteName),
+			Source:               types.StringValue(def.Source),
+			Description:          types.StringValue(def.Description),
+			DataverseTable:       types.StringValue(def.DataverseTable),
 			DataverseLogicalName: types.StringValue(def.DataverseLogicalName),
-			RequiredPermission:  types.StringValue(def.RequiredPermission),
-			PrimaryKey:          types.StringValue(def.PrimaryKey),
-			FieldCount:          types.Int64Value(int64(def.FieldCount)),
+			RequiredPermission:   types.StringValue(def.RequiredPermission),
+			PrimaryKey:           types.StringValue(def.PrimaryKey),
+			FieldCount:           types.Int64Value(int64(def.FieldCount)),
 		}
 	}
 

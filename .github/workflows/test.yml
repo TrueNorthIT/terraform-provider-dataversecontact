@@ -33,7 +33,9 @@ jobs:
         with:
           go-version-file: "go.mod"
           cache: true
-      - uses: golangci/golangci-lint-action@v6
+      # v8 installs golangci-lint v2, built with a Go new enough for this
+      # module's go directive (v6/golangci-lint v1 refuses go >= 1.25).
+      - uses: golangci/golangci-lint-action@v8
         with:
           version: latest
 
@@ -50,6 +52,38 @@ jobs:
       - run: go mod download
       - run: go test ./... -v -timeout 30m
 
+  docs:
+    name: Docs up to date
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false # tfplugindocs needs the raw binary
+      - run: go generate ./...
+      - run: git diff --exit-code -- docs/ examples/
+      - run: go tool tfplugindocs validate --provider-name dataversecontact
+
+  validate-examples:
+    name: Validate Examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - run: ./scripts/validate-examples.sh
+
   # Acceptance tests run against a real API instance
   # Only runs on main branch pushes (not PRs) to avoid exposing secrets
   acceptance:
@@ -61,6 +95,8 @@ jobs:
     env:
       TF_ACC: "1"
       DATAVERSE_CONTACT_API_URL: ${{ secrets.DATAVERSE_CONTACT_API_URL }}
+      DATAVERSE_CONTACT_CONNECTION_KEY: ${{ secrets.DATAVERSE_CONTACT_CONNECTION_KEY }}
+      # Deprecated fallback until the connection-key secret is configured
       DATAVERSE_CONTACT_API_KEY: ${{ secrets.DATAVERSE_CONTACT_API_KEY }}
     steps:
       - uses: actions/checkout@v4
