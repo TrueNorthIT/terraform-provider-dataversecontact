@@ -2,7 +2,7 @@ terraform {
   required_providers {
     dataversecontact = {
       source  = "TrueNorthIT/dataversecontact"
-      version = "~> 0.1"
+      version = "~> 1.0"
     }
   }
 }
