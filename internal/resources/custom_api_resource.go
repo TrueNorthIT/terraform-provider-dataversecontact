@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
@@ -75,8 +76,15 @@ func (r *CustomApiResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"schema_json": schema.StringAttribute{
-				Description: "The custom API schema as a JSON string (CustomApiHint format).",
-				Required:    true,
+				Description: "The custom API schema as a JSON string (CustomApiHint format: routeName, " +
+					"dataverseUniqueName, displayName, description, requiredPermission, isFunction, " +
+					"bindingType, publicInvoke, requestParameters, responseProperties — see the " +
+					"dataversecontact_custom_api example for the full shape). Usually jsonencode(...) " +
+					"or file(\"....customapi.json\").",
+				Required: true,
+				Validators: []validator.String{
+					ValidJSONObject(),
+				},
 			},
 			"source": schema.StringAttribute{
 				Description: "The source of the published schema (\"published\", \"built-in\").",

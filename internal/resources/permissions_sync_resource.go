@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
@@ -66,6 +69,8 @@ func (r *PermissionsSyncResource) Schema(_ context.Context, _ resource.SchemaReq
 	resp.Schema = schema.Schema{
 		Description: "Publishes a scope's baseline permissions (its defaults.json) to the API via " +
 			"PUT /api/v2/_admin/{scope}/table-manager/defaults. " +
+			"Every scope needs exactly one of these: a scope with no published defaults grants nothing, " +
+			"and every route answers `403 Missing required permission` — including reads. " +
 			"Use depends_on to ensure all tables are published before syncing. " +
 			"Use triggers to force a re-publish when table definitions change.",
 		Attributes: map[string]schema.Attribute{
@@ -92,6 +97,9 @@ func (r *PermissionsSyncResource) Schema(_ context.Context, _ resource.SchemaReq
 			"default_permissions": schema.MapAttribute{
 				Description: "The baseline permissions granted to every authenticated contact, keyed by route name. " +
 					"Each value is the list of permission tokens for that route (e.g. [\"team\", \"write\", \"create\"]). " +
+					"Known tokens: the read tiers \"me\" (rows reachable from the caller's own contact via the " +
+					"table's contact join), \"team\" and \"all\" (every row), plus \"write\" (update within the " +
+					"granted read tier), \"write:all\" and \"create\". " +
 					"Published as the `permissions` object of the scope's defaults.json.",
 				Optional:    true,
 				ElementType: types.ListType{ElemType: types.StringType},
@@ -111,6 +119,9 @@ func (r *PermissionsSyncResource) Schema(_ context.Context, _ resource.SchemaReq
 						Description: "\"parent-account\" (one Dataverse contact per company) or " +
 							"\"associated-accounts\" (one contact linked to several companies).",
 						Required: true,
+						Validators: []validator.String{
+							stringvalidator.OneOf("parent-account", "associated-accounts"),
+						},
 					},
 					"associated_accounts": schema.SingleNestedAttribute{
 						Description: "Required when strategy is \"associated-accounts\": how the single " +
@@ -120,6 +131,11 @@ func (r *PermissionsSyncResource) Schema(_ context.Context, _ resource.SchemaReq
 							"relationship": schema.StringAttribute{
 								Description: "N:N relationship / collection-nav on contact yielding the linked account rows.",
 								Optional:    true,
+								Validators: []validator.String{
+									stringvalidator.AtLeastOneOf(
+										path.MatchRelative().AtParent().AtName("fetch_xml"),
+									),
+								},
 							},
 							"account_id_field": schema.StringAttribute{
 								Description: "Account primary-key attribute to read. Defaults to accountid.",
@@ -148,6 +164,9 @@ func (r *PermissionsSyncResource) Schema(_ context.Context, _ resource.SchemaReq
 						Description: "Join strategy. Currently only \"domain-list\" — match the caller's verified " +
 							"email domain against a per-company account field.",
 						Required: true,
+						Validators: []validator.String{
+							stringvalidator.OneOf("domain-list"),
+						},
 					},
 					"domain_field": schema.StringAttribute{
 						Description: "For \"domain-list\": the account column listing the email domains allowed to " +
