@@ -1,0 +1,165 @@
+{
+  // VS Code snippets for the TrueNorthIT/dataversecontact Terraform provider.
+  // Copy this file into your repo's .vscode/ folder; type "dvc" in a .tf file
+  // to list the toolkit. Attribute-level autocomplete and hover docs come from
+  // the HashiCorp Terraform extension after `terraform init`.
+  "dataversecontact table": {
+    "scope": "terraform",
+    "prefix": "dvc-table",
+    "description": "Publish a Dataverse table to the Contact API",
+    "body": [
+      "resource \"dataversecontact_table\" \"${1:route}\" {",
+      "  scope           = ${2:var.scope}",
+      "  route_name      = \"${1:route}\"",
+      "  description     = \"${3:What this table holds}\"",
+      "  dataverse_table = \"${4:entity_set_name}\" # OData entity set (plural)",
+      "  primary_key     = \"${5:primarykeyid}\"",
+      "  # dataverse_logical_name omitted -> singularized dataverse_table",
+      "  # required_permission omitted    -> route_name",
+      "  # filters omitted                -> [\"statecode eq 0\"]",
+      "",
+      "  default_select = [\"${5:primarykeyid}\", \"${6:name}\"]",
+      "  lookup_fields  = [\"${6:name}\"]",
+      "",
+      "  fields = {",
+      "    ${5:primarykeyid} = {",
+      "      type        = \"string\"",
+      "      description = \"Unique identifier.\"",
+      "      read_only   = true",
+      "    }",
+      "    ${6:name} = {",
+      "      type        = \"string\"",
+      "      description = \"${7:Display name.}\"",
+      "    }",
+      "    $0",
+      "  }",
+      "}"
+    ]
+  },
+  "dataversecontact scalar field": {
+    "scope": "terraform",
+    "prefix": "dvc-field",
+    "description": "Field entry for a dataversecontact_table fields map",
+    "body": [
+      "${1:logicalname} = {",
+      "  type        = \"${2|string,number,datetime,boolean,choice|}\"",
+      "  description = \"${3:What this field holds.}\"${4:",
+      "  read_only   = true}",
+      "}"
+    ]
+  },
+  "dataversecontact lookup field": {
+    "scope": "terraform",
+    "prefix": "dvc-field-lookup",
+    "description": "Lookup field entry (points at another published route)",
+    "body": [
+      "${1:logicalname} = {",
+      "  type         = \"lookup\"",
+      "  description  = \"${2:What this points at.}\"",
+      "  lookup_table = \"${3:contact}\" # route name of the target table",
+      "  value_field  = \"_${1:logicalname}_value\" # for polymorphic lookups",
+      "  bind_field   = \"${4:NavigationProperty}\" # for @odata.bind writes",
+      "}"
+    ]
+  },
+  "dataversecontact expand block": {
+    "scope": "terraform",
+    "prefix": "dvc-expand",
+    "description": "Expand a lookup one level into a related table",
+    "body": [
+      "expand {",
+      "  lookup_field  = \"${1:NavigationProperty}\"",
+      "  related_table = \"${2:related_entity}\"",
+      "",
+      "  field {",
+      "    name        = \"${3:name}\"",
+      "    type        = \"${4|string,number,datetime,boolean,choice,lookup|}\"",
+      "    description = \"${5:Field description.}\"",
+      "  }",
+      "  $0",
+      "}"
+    ]
+  },
+  "dataversecontact contact join step": {
+    "scope": "terraform",
+    "prefix": "dvc-join-step",
+    "description": "Join step back to the contact for /me row-scoping",
+    "body": [
+      "# Ordered steps from this table back to the caller's contact.",
+      "# Ownerless child? Set reverse = true on the first step and put the",
+      "# parent relationship's collection nav in `from` (with key = \"\").",
+      "contact_join_step {",
+      "  table   = \"${1:contacts}\"",
+      "  from    = \"${2:lookup_or_collection_nav}\"",
+      "  key     = \"${3:contactid}\"",
+      "  reverse = ${4|false,true|}",
+      "}"
+    ]
+  },
+  "dataversecontact create default": {
+    "scope": "terraform",
+    "prefix": "dvc-create-default",
+    "description": "Auto-bind a lookup on create (e.g. always the caller)",
+    "body": [
+      "create_default {",
+      "  field      = \"${1:NavigationProperty}\"",
+      "  bind_to    = \"${2|contact,account|}\"",
+      "  entity_set = \"${3:contacts}\"",
+      "}"
+    ]
+  },
+  "dataversecontact permissions sync": {
+    "scope": "terraform",
+    "prefix": "dvc-permissions-sync",
+    "description": "Publish the scope's baseline permissions (mandatory per scope)",
+    "body": [
+      "# Mandatory: a scope with no published defaults grants nothing —",
+      "# every route answers \"403 Missing required permission\".",
+      "resource \"dataversecontact_permissions_sync\" \"${1:this}\" {",
+      "  scope = ${2:var.scope}",
+      "",
+      "  allow_self_register = ${3|false,true|}",
+      "",
+      "  # Tokens: \"me\" / \"team\" / \"all\" read tiers + \"write\", \"write:all\", \"create\"",
+      "  default_permissions = {",
+      "    ${4:route} = [\"${5|me,team,all|}\"${6:, \"write\", \"create\"}]",
+      "  }",
+      "",
+      "  # Re-publish whenever a table definition changes.",
+      "  triggers = {",
+      "    tables_hash = sha256(join(\",\", [",
+      "      dataversecontact_table.${4:route}.id,$0",
+      "    ]))",
+      "  }",
+      "",
+      "  depends_on = [",
+      "    dataversecontact_table.${4:route},",
+      "  ]",
+      "}"
+    ]
+  },
+  "dataversecontact custom api": {
+    "scope": "terraform",
+    "prefix": "dvc-custom-api",
+    "description": "Register a Dataverse Custom API route",
+    "body": [
+      "resource \"dataversecontact_custom_api\" \"${1:name}\" {",
+      "  scope      = ${2:var.scope}",
+      "  route_name = \"${3:my-action}\"",
+      "",
+      "  # Alternatively: schema_json = file(\"\\${path.module}/${3:my-action}.customapi.json\")",
+      "  schema_json = jsonencode({",
+      "    routeName           = \"${3:my-action}\"",
+      "    dataverseUniqueName = \"${4:MyAction}\"",
+      "    requiredPermission  = \"${3:my-action}:invoke\"",
+      "    isFunction          = ${5|true,false|} # true = GET function, false = POST action",
+      "    publicInvoke        = ${6|false,true|}",
+      "    bindingType         = \"${7|global,entity,entityCollection|}\"",
+      "    requestParameters = [",
+      "      { uniqueName = \"${8:Start}\", type = \"${9|string,number,datetime,boolean|}\" },",
+      "    ]",
+      "  })",
+      "}"
+    ]
+  }
+}
