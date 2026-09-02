@@ -33,7 +33,9 @@ jobs:
         with:
           go-version-file: "go.mod"
           cache: true
-      - uses: golangci/golangci-lint-action@v6
+      # v8 installs golangci-lint v2, built with a Go new enough for this
+      # module's go directive (v6/golangci-lint v1 refuses go >= 1.25).
+      - uses: golangci/golangci-lint-action@v8
         with:
           version: latest
 
