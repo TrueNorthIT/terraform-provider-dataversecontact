@@ -3,10 +3,10 @@ data "dataversecontact_table" "case" {
   route_name = "case"
 }
 
-output "schema" {
-  value = data.dataversecontact_table.case.schema_json
-}
-
 output "dataverse_table" {
   value = data.dataversecontact_table.case.dataverse_table
+}
+
+output "field_count" {
+  value = data.dataversecontact_table.case.field_count
 }
