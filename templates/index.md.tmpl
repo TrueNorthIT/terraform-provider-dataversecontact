@@ -1,0 +1,38 @@
+---
+page_title: "Provider: Dataverse Contact"
+description: |-
+  Manage the Dataverse Contact API's published surface — tables, fields, custom APIs and baseline permissions — as code.
+---
+
+# Dataverse Contact Provider
+
+The Dataverse Contact API sits in front of Microsoft Dataverse and only exposes
+the tables, fields and custom actions that have been explicitly configured for
+it. This provider manages that configuration: which Dataverse tables are
+published to the API, which fields callers can read and write, which Dataverse
+Custom APIs are callable, and the baseline permissions every authenticated
+caller gets in each scope.
+
+With it, a whole portal backend (e.g. a citizen booking service) can be
+provisioned with `terraform apply`, reviewed in version control, and reproduced
+in a new environment in minutes.
+
+New here? Start with the [Getting started](guides/getting-started) guide. The
+[Permissions](guides/permissions) and
+[Parent-scoped children](guides/parent-scoped-children) guides cover the two
+concepts that most often trip people up.
+
+## Example Usage
+
+{{ tffile "examples/provider/provider.tf" }}
+
+Authentication is the pre-shared admin connection key, sent as the admin Bearer
+token. It must be byte-identical to `ADMIN_CONNECTION_KEY` on the API
+deployment. Prefer supplying it via the `DATAVERSE_CONTACT_CONNECTION_KEY`
+environment variable rather than in configuration.
+
+~> Every scope needs exactly one `dataversecontact_permissions_sync` resource.
+A scope with no published defaults grants nothing — every route answers
+`403 Missing required permission`, including reads.
+
+{{ .SchemaMarkdown | trimspace }}
