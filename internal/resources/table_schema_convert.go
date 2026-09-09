@@ -32,6 +32,7 @@ type SchemaHintJSON struct {
 	LookupSearchContains      []string                 `json:"lookupSearchContains,omitempty"`
 	Filters                   []string                 `json:"filters,omitempty"`
 	ParentTable               *ParentTableJSON         `json:"parentTable,omitempty"`
+	PolymorphicLookup         *PolymorphicLookupJSON   `json:"polymorphicLookup,omitempty"`
 	Expands                   []ExpandJSON             `json:"expands,omitempty"`
 	PublicChoices             *bool                    `json:"publicChoices,omitempty"`
 	PublicRead                *bool                    `json:"publicRead,omitempty"`
@@ -60,6 +61,17 @@ type CreateDefaultJSON struct {
 type ParentTableJSON struct {
 	Table              string `json:"table"`
 	NavigationProperty string `json:"navigationProperty"`
+}
+
+// PolymorphicLookupJSON publishes every target of a polymorphic lookup as a
+// route of its own, derived by the API from live Dataverse metadata.
+type PolymorphicLookupJSON struct {
+	Field              string   `json:"field"`
+	RequiredPermission string   `json:"requiredPermission"`
+	RoutePrefixStrip   string   `json:"routePrefixStrip,omitempty"`
+	TargetPrefix       string   `json:"targetPrefix,omitempty"`
+	ExcludeTargets     []string `json:"excludeTargets,omitempty"`
+	ReadOnly           *bool    `json:"readOnly,omitempty"`
 }
 
 // ExpandJSON is an expandable lookup into a related table.
@@ -163,6 +175,27 @@ func modelToSchemaJSON(ctx context.Context, model *TableResourceModel, diags *di
 		}
 	}
 
+	// Polymorphic family rule — SingleNestedBlock is always non-nil, so the
+	// inner value is what says whether the author declared one.
+	if model.PolymorphicLookup != nil &&
+		!model.PolymorphicLookup.Field.IsNull() && !model.PolymorphicLookup.Field.IsUnknown() {
+		rule := &PolymorphicLookupJSON{
+			Field:              model.PolymorphicLookup.Field.ValueString(),
+			RequiredPermission: model.PolymorphicLookup.RequiredPermission.ValueString(),
+			RoutePrefixStrip:   model.PolymorphicLookup.RoutePrefixStrip.ValueString(),
+			TargetPrefix:       model.PolymorphicLookup.TargetPrefix.ValueString(),
+			ExcludeTargets:     tfListToStrings(ctx, model.PolymorphicLookup.ExcludeTargets, diags),
+		}
+		// Only sent when the author set it. Absent means the API's default
+		// (read-only), and sending `false` for an unset block would silently
+		// open every derived table for writing.
+		if !model.PolymorphicLookup.ReadOnly.IsNull() && !model.PolymorphicLookup.ReadOnly.IsUnknown() {
+			readOnly := model.PolymorphicLookup.ReadOnly.ValueBool()
+			rule.ReadOnly = &readOnly
+		}
+		hint.PolymorphicLookup = rule
+	}
+
 	// Expands
 	hint.Expands = expandsModelToJSON(ctx, model.Expand, diags)
 
@@ -238,6 +271,24 @@ func schemaJSONToModel(ctx context.Context, raw json.RawMessage, model *TableRes
 
 	// Create defaults
 	model.CreateDefault = createDefaultsJSONToModel(hint.CreateDefaults)
+
+	// Polymorphic family rule
+	if hint.PolymorphicLookup != nil {
+		readOnly := types.BoolNull()
+		if hint.PolymorphicLookup.ReadOnly != nil {
+			readOnly = types.BoolValue(*hint.PolymorphicLookup.ReadOnly)
+		}
+		model.PolymorphicLookup = &PolymorphicLookupModel{
+			Field:              types.StringValue(hint.PolymorphicLookup.Field),
+			RequiredPermission: types.StringValue(hint.PolymorphicLookup.RequiredPermission),
+			RoutePrefixStrip:   stringOrNull(hint.PolymorphicLookup.RoutePrefixStrip),
+			TargetPrefix:       stringOrNull(hint.PolymorphicLookup.TargetPrefix),
+			ExcludeTargets:     stringsToTFListOrNull(hint.PolymorphicLookup.ExcludeTargets),
+			ReadOnly:           readOnly,
+		}
+	} else {
+		model.PolymorphicLookup = nil
+	}
 
 	// Parent table
 	if hint.ParentTable != nil {

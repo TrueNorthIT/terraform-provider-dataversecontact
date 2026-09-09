@@ -112,3 +112,71 @@ resource "dataversecontact_table" "service" {
     }
   }
 }
+
+# A polymorphic family: publish every target of a lookup as a route, without
+# declaring one dataversecontact_table per target.
+#
+# Service Builder emits one Dataverse table per service and points
+# incident.sb_service_recordid at it, so the set grows whenever a service
+# ships. Declaring the RULE means a new service is readable the moment its
+# table exists — there is no generated table list to regenerate, and nothing
+# to remember after a publish.
+resource "dataversecontact_table" "case_with_service_answers" {
+  scope                  = "fcc"
+  route_name             = "case"
+  dataverse_table        = "incidents"
+  dataverse_logical_name = "incident"
+  primary_key            = "incidentid"
+  required_permission    = "case"
+
+  default_select = ["incidentid", "title", "sb_service_recordid"]
+  lookup_fields  = ["title"]
+
+  fields = {
+    title = { type = "string", description = "Case title." }
+    # The rule's field must also be declared as a lookup here, or
+    # ?expand=sb_service_recordid cannot be rewritten onto the concrete
+    # targets — it fails by returning nothing, not by erroring.
+    #
+    # It deliberately carries NO lookup_table, and must not be given one: a
+    # polymorphic lookup points at many tables, so naming one would be a claim
+    # the data contradicts. Dataverse says which target a given row used, and
+    # the API surfaces that as sb_service_recordid_logicalname. The provider
+    # exempts a field named by polymorphic_lookup from the lookup_table rule
+    # for exactly this reason.
+    sb_service_recordid = {
+      type        = "lookup"
+      description = "Your submitted answers."
+      read_only   = true
+    }
+  }
+
+  # Derived routes inherit this, with the reverse hop into `incidents`
+  # prefixed — so they need no join of their own.
+  contact_join_step {
+    table = "contacts"
+    from  = "customerid_contact"
+    key   = "contactid"
+  }
+
+  polymorphic_lookup {
+    field               = "sb_service_recordid"
+    required_permission = "servicerecord"
+    route_prefix_strip  = "sb_" # sb_missed_bin → GET /me/missed_bin/{id}
+    exclude_targets     = ["sb_service_request"]
+  }
+}
+
+# One entry covers the whole family. The API fans `servicerecord` out onto
+# every derived route, because default_permissions is keyed by ROUTE name and
+# a key naming only the permission would match no table and grant nothing.
+resource "dataversecontact_permissions_sync" "fcc" {
+  scope = "fcc"
+
+  default_permissions = {
+    case          = ["me", "write", "create"]
+    servicerecord = ["me"]
+  }
+
+  depends_on = [dataversecontact_table.case_with_service_answers]
+}

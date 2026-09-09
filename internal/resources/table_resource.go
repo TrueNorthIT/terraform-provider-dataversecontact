@@ -70,6 +70,7 @@ type TableResourceModel struct {
 	AlternateContactJoinPath []AlternateContactJoinPathModel `tfsdk:"alternate_contact_join_path"`
 	CreateDefault            []CreateDefaultModel            `tfsdk:"create_default"`
 	ParentTable              *ParentTableModel               `tfsdk:"parent_table"`
+	PolymorphicLookup        *PolymorphicLookupModel         `tfsdk:"polymorphic_lookup"`
 	Expand                   []ExpandModel                   `tfsdk:"expand"`
 
 	// Computed
@@ -101,6 +102,17 @@ type CreateDefaultModel struct {
 type ParentTableModel struct {
 	Table              types.String `tfsdk:"table"`
 	NavigationProperty types.String `tfsdk:"navigation_property"`
+}
+
+// PolymorphicLookupModel publishes every target of a polymorphic lookup as a
+// route of its own.
+type PolymorphicLookupModel struct {
+	Field              types.String `tfsdk:"field"`
+	RequiredPermission types.String `tfsdk:"required_permission"`
+	RoutePrefixStrip   types.String `tfsdk:"route_prefix_strip"`
+	TargetPrefix       types.String `tfsdk:"target_prefix"`
+	ExcludeTargets     types.List   `tfsdk:"exclude_targets"`
+	ReadOnly           types.Bool   `tfsdk:"read_only"`
 }
 
 // ExpandModel is an expandable lookup into a related table.
@@ -377,6 +389,53 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 					},
 				},
 			},
+			"polymorphic_lookup": schema.SingleNestedBlock{
+				Description: "Publish every target of a polymorphic lookup on this table as a route " +
+					"of its own, derived by the API from live Dataverse metadata — instead of declaring " +
+					"one dataversecontact_table per target.\n\n" +
+					"Scoping needs no declaring: a target row has no lookup back to the caller, so its " +
+					"path is the reverse hop into this table (read from metadata) followed by this " +
+					"table's own contact_join_step chain. Grant the whole family in one go by adding " +
+					"required_permission to dataversecontact_permissions_sync.default_permissions.\n\n" +
+					"A target's columns are published without anyone reviewing them — that is the trade " +
+					"for never going stale. Fields are read-only by default; target_prefix and " +
+					"exclude_targets bound the family if the lookup reaches further than intended.",
+				Attributes: map[string]schema.Attribute{
+					"field": schema.StringAttribute{
+						Description: "The polymorphic lookup on this table whose targets become routes " +
+							"(e.g. \"sb_service_recordid\"). Must also be declared in `fields` as a lookup, " +
+							"or ?expand=<field> cannot be rewritten onto the concrete targets.",
+						Optional: true,
+					},
+					"required_permission": schema.StringAttribute{
+						Description: "Permission subject every derived route requires (e.g. \"servicerecord\"). " +
+							"Use this same name as the key in default_permissions — the API fans it out onto " +
+							"each derived route, which is what makes one entry cover the whole family.",
+						Optional: true,
+					},
+					"route_prefix_strip": schema.StringAttribute{
+						Description: "Prefix removed from a target's logical name to form its route name " +
+							"(\"sb_\" turns sb_missed_bin into the route missed_bin). Also bounds which " +
+							"single-target lookups are inlined as expands, unless target_prefix is set.",
+						Optional: true,
+					},
+					"target_prefix": schema.StringAttribute{
+						Description: "Only publish targets whose logical name starts with this. Unset " +
+							"publishes every target the lookup reaches.",
+						Optional: true,
+					},
+					"exclude_targets": schema.ListAttribute{
+						Description: "Logical names never published, however they match.",
+						ElementType: types.StringType,
+						Optional:    true,
+					},
+					"read_only": schema.BoolAttribute{
+						Description: "Mark every derived field read-only. Defaults to true — a rule that " +
+							"publishes tables nobody reviewed should not also open them for writing.",
+						Optional: true,
+					},
+				},
+			},
 			"expand": schema.ListNestedBlock{
 				Description: "Expandable lookup fields — one level deep into related tables.",
 				NestedObject: schema.NestedBlockObject{
@@ -432,6 +491,18 @@ func (r *TableResource) ValidateConfig(ctx context.Context, req resource.Validat
 		return
 	}
 
+	// The field a polymorphic_lookup rule names is exempt from the
+	// lookup_table requirement below. It CANNOT have one: a polymorphic lookup
+	// points at many tables — that is the entire reason the rule exists — and
+	// naming one of them would be a claim the data contradicts. Dataverse says
+	// which target a given row used, in the lookuplogicalname annotation the
+	// API surfaces as `<field>_logicalname`.
+	polymorphicField := ""
+	if config.PolymorphicLookup != nil &&
+		!config.PolymorphicLookup.Field.IsNull() && !config.PolymorphicLookup.Field.IsUnknown() {
+		polymorphicField = config.PolymorphicLookup.Field.ValueString()
+	}
+
 	if !config.Fields.IsNull() && !config.Fields.IsUnknown() {
 		for name, val := range config.Fields.Elements() {
 			obj, ok := val.(types.Object)
@@ -445,6 +516,8 @@ func (r *TableResource) ValidateConfig(ctx context.Context, req resource.Validat
 				continue
 			}
 			switch {
+			case name == polymorphicField && fieldType.ValueString() == "lookup":
+				// Exempt — see above.
 			case fieldType.ValueString() == "lookup" && lookupTable.IsNull():
 				resp.Diagnostics.AddAttributeError(
 					path.Root("fields").AtMapKey(name).AtName("lookup_table"),
