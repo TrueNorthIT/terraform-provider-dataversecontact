@@ -188,3 +188,81 @@ func TestNoPolymorphicLookupOmitsRule(t *testing.T) {
 		t.Fatalf("a table with no block sent a rule: %s", raw)
 	}
 }
+
+// The anchor of a polymorphic family gets that family's expands back from the
+// API, derived from live metadata rather than declared here. Adopting them as
+// state made every apply fail — "Provider produced inconsistent result after
+// apply: .expand block count changed from 0 to N" — and then offer to delete
+// expands the config never wrote. They must not reach the model.
+func TestDerivedExpandsAreNotAdopted(t *testing.T) {
+	var diags diag.Diagnostics
+	var model TableResourceModel
+
+	raw := []byte(`{
+	  "routeName": "case",
+	  "dataverseTable": "incidents",
+	  "dataverseLogicalName": "incident",
+	  "requiredPermission": "case",
+	  "primaryKey": "incidentid",
+	  "defaultSelect": ["incidentid"],
+	  "lookupFields": ["title"],
+	  "fields": {"incidentid": {"type": "string", "description": "Id"}},
+	  "polymorphicLookup": {
+	    "field": "sb_service_recordid",
+	    "requiredPermission": "servicerecord"
+	  },
+	  "expands": [
+	    {"lookupField": "sb_service_recordid_sb_missed_bin", "relatedTable": "sb_missed_bin", "fields": []},
+	    {"lookupField": "sb_service_recordid_sb_report_flooding", "relatedTable": "sb_report_flooding", "fields": []},
+	    {"lookupField": "sb_address", "relatedTable": "sb_location", "fields": []}
+	  ]
+	}`)
+
+	schemaJSONToModel(context.Background(), raw, &model, &diags)
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
+
+	// The declared expand on an unrelated lookup survives; the two derived off
+	// the rule's own field do not.
+	if len(model.Expand) != 1 {
+		got := make([]string, 0, len(model.Expand))
+		for _, e := range model.Expand {
+			got = append(got, e.LookupField.ValueString())
+		}
+		t.Fatalf("expected only the declared expand to survive, got %v", got)
+	}
+	if model.Expand[0].LookupField.ValueString() != "sb_address" {
+		t.Errorf("expected sb_address to survive, got %s", model.Expand[0].LookupField.ValueString())
+	}
+}
+
+// Without a rule, nothing is filtered: a table that genuinely declares expands
+// named after a lookup keeps every one of them.
+func TestExpandsKeptWithoutPolymorphicRule(t *testing.T) {
+	var diags diag.Diagnostics
+	var model TableResourceModel
+
+	raw := []byte(`{
+	  "routeName": "case",
+	  "dataverseTable": "incidents",
+	  "dataverseLogicalName": "incident",
+	  "requiredPermission": "case",
+	  "primaryKey": "incidentid",
+	  "defaultSelect": ["incidentid"],
+	  "lookupFields": ["title"],
+	  "fields": {"incidentid": {"type": "string", "description": "Id"}},
+	  "expands": [
+	    {"lookupField": "sb_service_recordid_sb_missed_bin", "relatedTable": "sb_missed_bin", "fields": []},
+	    {"lookupField": "sb_address", "relatedTable": "sb_location", "fields": []}
+	  ]
+	}`)
+
+	schemaJSONToModel(context.Background(), raw, &model, &diags)
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
+	if len(model.Expand) != 2 {
+		t.Fatalf("expected both expands to survive without a rule, got %d", len(model.Expand))
+	}
+}
