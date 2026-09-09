@@ -146,3 +146,54 @@ func TestDeleteTable(t *testing.T) {
 		t.Errorf("expected 3 API calls (unpublish + remove + delete), got %d: %v", len(calls), calls)
 	}
 }
+
+// A table that is already gone deletes cleanly. `remove` finds nothing to bin,
+// so the purge answers 404 — there was nothing left to delete, which is not a
+// failure. Before this, Terraform could hold state for a table the API no
+// longer had and no retry could clear it.
+func TestDeleteTableAlreadyGone(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v2/_admin/default/table-manager/unpublish":
+			_ = json.NewEncoder(w).Encode(UnpublishResponse{})
+		case r.URL.Path == "/api/v2/_admin/default/table-manager/remove":
+			_ = json.NewEncoder(w).Encode(RemoveResponse{Removed: []string{}})
+		case r.URL.Path == "/api/v2/_admin/default/table-manager/recycled/gone":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"Not Found","message":"Table \"gone\" not found in recycle bin"}`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "test-key")
+	if err := c.DeleteTable(context.Background(), "default", "gone"); err != nil {
+		t.Fatalf("deleting an already-deleted table should succeed, got: %v", err)
+	}
+}
+
+// A 404 is only forgiven when nothing was binned. If `remove` DID bin the
+// table and the purge then cannot find it, something else deleted it from
+// under us and the error is real.
+func TestDeleteTableBinnedThenMissingErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v2/_admin/default/table-manager/unpublish":
+			_ = json.NewEncoder(w).Encode(UnpublishResponse{})
+		case r.URL.Path == "/api/v2/_admin/default/table-manager/remove":
+			_ = json.NewEncoder(w).Encode(RemoveResponse{Removed: []string{"raced"}})
+		case r.URL.Path == "/api/v2/_admin/default/table-manager/recycled/raced":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"Not Found","message":"Table \"raced\" not found in recycle bin"}`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "test-key")
+	if err := c.DeleteTable(context.Background(), "default", "raced"); err == nil {
+		t.Fatal("expected an error when a binned table vanishes before the purge")
+	}
+}

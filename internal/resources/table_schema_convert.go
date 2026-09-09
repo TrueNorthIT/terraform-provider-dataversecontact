@@ -301,7 +301,45 @@ func schemaJSONToModel(ctx context.Context, raw json.RawMessage, model *TableRes
 	}
 
 	// Expands
-	model.Expand = expandsJSONToModel(ctx, hint.Expands, diags)
+	//
+	// A table carrying a `polymorphic_lookup` rule gets the anchor side of the
+	// family's expands back from the API, derived from live Dataverse metadata
+	// and never written here. The admin read is registry-backed, so it cannot
+	// tell a derived expand from a declared one — and adopting them as state
+	// makes every apply fail with "Provider produced inconsistent result after
+	// apply: .expand block count changed from 0 to N", then a plan that offers
+	// to delete expands the config never declared.
+	//
+	// Drop them on the way in. The API names each one `<field>_<targetentity>`
+	// after the navigation property, so the rule's own field identifies the
+	// set exactly; an expand declared on any other lookup is untouched.
+	expands := hint.Expands
+	if hint.PolymorphicLookup != nil {
+		expands = dropDerivedExpands(expands, hint.PolymorphicLookup.Field)
+	}
+	model.Expand = expandsJSONToModel(ctx, expands, diags)
+}
+
+// dropDerivedExpands removes the expands a polymorphic family derives onto its
+// anchor — those on `field` itself, named `<field>_<targetentity>`. An expand
+// on `field` with no suffix is left alone: Dataverse refuses `$expand` on an
+// abstract target, so it cannot have been derived.
+func dropDerivedExpands(expands []ExpandJSON, field string) []ExpandJSON {
+	if field == "" {
+		return expands
+	}
+	prefix := field + "_"
+	kept := make([]ExpandJSON, 0, len(expands))
+	for _, e := range expands {
+		if strings.HasPrefix(e.LookupField, prefix) {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
 }
 
 // ── Fields helpers ──────────────────────────────────────────────────────

@@ -104,15 +104,31 @@ func (c *Client) SaveAndPublishTable(ctx context.Context, scope, routeName strin
 }
 
 // DeleteTable performs the full delete lifecycle: unpublish → remove → permanent delete.
+//
+// Deleting an ALREADY-DELETED table succeeds. `remove` only finds a table that
+// has a published blob or a draft, so a table that is already gone never
+// reaches the recycle bin and step 3 then answers 404 — the delete had nothing
+// left to do, which is not a failure. Erroring there left Terraform holding
+// state for a table the API no longer had, and no retry could clear it: every
+// subsequent destroy took the same path and failed the same way, so the only
+// way out was `terraform state rm`.
+//
+// A 404 is only accepted when `remove` also reported nothing removed. If
+// remove DID bin the table and the purge then 404s, something raced us and the
+// error is real.
 func (c *Client) DeleteTable(ctx context.Context, scope, routeName string) error {
 	// Step 1: Unpublish (ignore errors — may already be unpublished)
 	_, _ = c.UnpublishTables(ctx, scope, []string{routeName})
 
 	// Step 2: Remove to recycle bin (ignore errors — may already be removed)
-	_, _ = c.RemoveTables(ctx, scope, []string{routeName})
+	removeResp, _ := c.RemoveTables(ctx, scope, []string{routeName})
+	binned := removeResp != nil && len(removeResp.Removed) > 0
 
 	// Step 3: Permanently delete
 	if err := c.PermanentlyDeleteTable(ctx, scope, routeName); err != nil {
+		if IsNotFound(err) && !binned {
+			return nil
+		}
 		return fmt.Errorf("failed to permanently delete table %q: %w", routeName, err)
 	}
 
