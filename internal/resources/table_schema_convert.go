@@ -33,6 +33,7 @@ type SchemaHintJSON struct {
 	Filters                   []string                 `json:"filters,omitempty"`
 	ParentTable               *ParentTableJSON         `json:"parentTable,omitempty"`
 	PolymorphicLookup         *PolymorphicLookupJSON   `json:"polymorphicLookup,omitempty"`
+	BusinessProcess           *BusinessProcessJSON     `json:"businessProcess,omitempty"`
 	Expands                   []ExpandJSON             `json:"expands,omitempty"`
 	PublicChoices             *bool                    `json:"publicChoices,omitempty"`
 	PublicRead                *bool                    `json:"publicRead,omitempty"`
@@ -66,12 +67,20 @@ type ParentTableJSON struct {
 // PolymorphicLookupJSON publishes every target of a polymorphic lookup as a
 // route of its own, derived by the API from live Dataverse metadata.
 type PolymorphicLookupJSON struct {
-	Field              string   `json:"field"`
-	RequiredPermission string   `json:"requiredPermission"`
-	RoutePrefixStrip   string   `json:"routePrefixStrip,omitempty"`
-	TargetPrefix       string   `json:"targetPrefix,omitempty"`
-	ExcludeTargets     []string `json:"excludeTargets,omitempty"`
-	ReadOnly           *bool    `json:"readOnly,omitempty"`
+	Field              string               `json:"field"`
+	RequiredPermission string               `json:"requiredPermission"`
+	RoutePrefixStrip   string               `json:"routePrefixStrip,omitempty"`
+	TargetPrefix       string               `json:"targetPrefix,omitempty"`
+	ExcludeTargets     []string             `json:"excludeTargets,omitempty"`
+	ReadOnly           *bool                `json:"readOnly,omitempty"`
+	BusinessProcess    *BusinessProcessJSON `json:"businessProcess,omitempty"`
+}
+
+// BusinessProcessJSON asks the API to expose a business process flow on a
+// table's rows. An empty object is meaningful — it means "with the default
+// name" — so the pointer, not the field, says whether the author asked.
+type BusinessProcessJSON struct {
+	ExposeAs string `json:"exposeAs,omitempty"`
 }
 
 // ExpandJSON is an expandable lookup into a related table.
@@ -193,8 +202,12 @@ func modelToSchemaJSON(ctx context.Context, model *TableResourceModel, diags *di
 			readOnly := model.PolymorphicLookup.ReadOnly.ValueBool()
 			rule.ReadOnly = &readOnly
 		}
+		rule.BusinessProcess = businessProcessModelToJSON(model.PolymorphicLookup.BusinessProcess)
 		hint.PolymorphicLookup = rule
 	}
+
+	// The table's own business process. Nested attribute, so nil means unset.
+	hint.BusinessProcess = businessProcessModelToJSON(model.BusinessProcess)
 
 	// Expands
 	hint.Expands = expandsModelToJSON(ctx, model.Expand, diags)
@@ -285,10 +298,14 @@ func schemaJSONToModel(ctx context.Context, raw json.RawMessage, model *TableRes
 			TargetPrefix:       stringOrNull(hint.PolymorphicLookup.TargetPrefix),
 			ExcludeTargets:     stringsToTFListOrNull(hint.PolymorphicLookup.ExcludeTargets),
 			ReadOnly:           readOnly,
+			BusinessProcess:    businessProcessJSONToModel(hint.PolymorphicLookup.BusinessProcess),
 		}
 	} else {
 		model.PolymorphicLookup = nil
 	}
+
+	// The table's own business process
+	model.BusinessProcess = businessProcessJSONToModel(hint.BusinessProcess)
 
 	// Parent table
 	if hint.ParentTable != nil {
@@ -590,6 +607,30 @@ func stringsToTFListOrNull(vals []string) types.List {
 		return types.ListNull(types.StringType)
 	}
 	return stringsToTFList(vals)
+}
+
+// businessProcessModelToJSON: nil in, nil out — an absent attribute must not
+// reach the API as an empty object, or every table would start deriving a
+// process it never asked for.
+func businessProcessModelToJSON(bp *BusinessProcessModel) *BusinessProcessJSON {
+	if bp == nil {
+		return nil
+	}
+	out := &BusinessProcessJSON{}
+	if !bp.ExposeAs.IsNull() && !bp.ExposeAs.IsUnknown() {
+		out.ExposeAs = bp.ExposeAs.ValueString()
+	}
+	return out
+}
+
+// businessProcessJSONToModel: absent reads back as nil and an empty object
+// as a model with a null expose_as, so neither shows as a diff against the
+// config that produced it.
+func businessProcessJSONToModel(bp *BusinessProcessJSON) *BusinessProcessModel {
+	if bp == nil {
+		return nil
+	}
+	return &BusinessProcessModel{ExposeAs: stringOrNull(bp.ExposeAs)}
 }
 
 func stringOrNull(s string) types.String {

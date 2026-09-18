@@ -164,6 +164,12 @@ resource "dataversecontact_table" "case_with_service_answers" {
     required_permission = "servicerecord"
     route_prefix_strip  = "sb_" # sb_missed_bin → GET /me/missed_bin/{id}
     exclude_targets     = ["sb_service_request"]
+
+    # Each service table has its own business process flow. With this, every
+    # case row carries `progress` — the stage its service record is in — or
+    # null. One extra Dataverse read per page, never one per row. For a
+    # process on the table ITSELF, set `business_process` on the resource.
+    business_process = { expose_as = "progress" }
   }
 }
 

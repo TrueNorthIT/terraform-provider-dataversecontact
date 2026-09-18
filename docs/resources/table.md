@@ -179,6 +179,12 @@ resource "dataversecontact_table" "case_with_service_answers" {
     required_permission = "servicerecord"
     route_prefix_strip  = "sb_" # sb_missed_bin → GET /me/missed_bin/{id}
     exclude_targets     = ["sb_service_request"]
+
+    # Each service table has its own business process flow. With this, every
+    # case row carries `progress` — the stage its service record is in — or
+    # null. One extra Dataverse read per page, never one per row. For a
+    # process on the table ITSELF, set `business_process` on the resource.
+    business_process = { expose_as = "progress" }
   }
 }
 
@@ -214,6 +220,7 @@ resource "dataversecontact_permissions_sync" "fcc" {
 
 - `aliases` (List of String) Optional route aliases.
 - `alternate_contact_join_path` (Block List) Additional join paths to the contact (OR'd with contact_join_step). (see [below for nested schema](#nestedblock--alternate_contact_join_path))
+- `business_process` (Attributes) Expose this table's own business process flow on this table's rows. Every row then carries an object (`progress` unless expose_as renames it) with the process instance's state, active stage and ordered stages — or null when there is no process or no instance for the row. Derived by the API per request, read-only, not selectable. The API's Dataverse application user needs Read on workflow, processstage and the process's instance table. (see [below for nested schema](#nestedatt--business_process))
 - `contact_join_step` (Block List) Steps to join back to the contact from this table (ordered). (see [below for nested schema](#nestedblock--contact_join_step))
 - `create_default` (Block List) Lookup fields automatically bound when creating a record. (see [below for nested schema](#nestedblock--create_default))
 - `dataverse_logical_name` (String) The Dataverse entity logical name (e.g. "incident"). If omitted, derived by singularizing dataverse_table.
@@ -280,6 +287,14 @@ Optional:
 
 
 
+<a id="nestedatt--business_process"></a>
+### Nested Schema for `business_process`
+
+Optional:
+
+- `expose_as` (String) Property name on each row. Defaults to "progress". Must not collide with a field of this table.
+
+
 <a id="nestedblock--contact_join_step"></a>
 ### Nested Schema for `contact_join_step`
 
@@ -341,12 +356,21 @@ Optional:
 
 Optional:
 
+- `business_process` (Attributes) Expose each target's business process flow on this table's rows. Every row then carries an object (`progress` unless expose_as renames it) with the process instance's state, active stage and ordered stages — or null when there is no process or no instance for the row. Derived by the API per request, read-only, not selectable. The API's Dataverse application user needs Read on workflow, processstage and the process's instance table. (see [below for nested schema](#nestedatt--polymorphic_lookup--business_process))
 - `exclude_targets` (List of String) Logical names never published, however they match.
 - `field` (String) The polymorphic lookup on this table whose targets become routes (e.g. "sb_service_recordid"). Must also be declared in `fields` as a lookup, or ?expand=<field> cannot be rewritten onto the concrete targets.
 - `read_only` (Boolean) Mark every derived field read-only. Defaults to true — a rule that publishes tables nobody reviewed should not also open them for writing.
 - `required_permission` (String) Permission subject every derived route requires (e.g. "servicerecord"). Use this same name as the key in default_permissions — the API fans it out onto each derived route, which is what makes one entry cover the whole family.
 - `route_prefix_strip` (String) Prefix removed from a target's logical name to form its route name ("sb_" turns sb_missed_bin into the route missed_bin). Also bounds which single-target lookups are inlined as expands, unless target_prefix is set.
 - `target_prefix` (String) Only publish targets whose logical name starts with this. Unset publishes every target the lookup reaches.
+
+<a id="nestedatt--polymorphic_lookup--business_process"></a>
+### Nested Schema for `polymorphic_lookup.business_process`
+
+Optional:
+
+- `expose_as` (String) Property name on each row. Defaults to "progress". Must not collide with a field of this table.
+
 
 
 <a id="nestedblock--team_join_step"></a>
