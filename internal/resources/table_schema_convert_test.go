@@ -128,6 +128,17 @@ func TestPolymorphicLookupRoundTrip(t *testing.T) {
 	if len(excludes) != 1 || excludes[0] != "sb_service_request" {
 		t.Errorf("exclude_targets = %v, want [sb_service_request]", excludes)
 	}
+	// No business_process written, none sent, none read back — a nil pointer
+	// on both sides, or every plan would show one appearing.
+	if strings.Contains(string(raw), `"businessProcess"`) {
+		t.Fatalf("unset business_process was serialised: %s", raw)
+	}
+	if out.PolymorphicLookup.BusinessProcess != nil {
+		t.Errorf("business_process read back as %v, want nil", out.PolymorphicLookup.BusinessProcess)
+	}
+	if out.BusinessProcess != nil {
+		t.Errorf("table-level business_process read back as %v, want nil", out.BusinessProcess)
+	}
 }
 
 // TestPolymorphicLookupExplicitFalseIsSent is the other half: an author who
@@ -264,5 +275,95 @@ func TestExpandsKeptWithoutPolymorphicRule(t *testing.T) {
 	}
 	if len(model.Expand) != 2 {
 		t.Fatalf("expected both expands to survive without a rule, got %d", len(model.Expand))
+	}
+}
+
+// TestBusinessProcessRoundTrip: the flag travels on the rule as
+// `businessProcess`, with `exposeAs` only when the author named one, and
+// comes back exactly as written.
+func TestBusinessProcessRoundTrip(t *testing.T) {
+	var diags diag.Diagnostics
+
+	model := &TableResourceModel{
+		RouteName:            types.StringValue("case"),
+		DataverseTable:       types.StringValue("incidents"),
+		DataverseLogicalName: types.StringValue("incident"),
+		PrimaryKey:           types.StringValue("incidentid"),
+		RequiredPermission:   types.StringValue("case"),
+		DefaultSelect:        stringsToTFList([]string{"incidentid"}),
+		LookupFields:         stringsToTFList([]string{"title"}),
+		Fields:               fieldsJSONToModel(context.Background(), map[string]FieldHintJSON{}, &diags),
+		PolymorphicLookup: &PolymorphicLookupModel{
+			Field:              types.StringValue("sb_service_recordid"),
+			RequiredPermission: types.StringValue("servicerecord"),
+			BusinessProcess:    &BusinessProcessModel{ExposeAs: types.StringValue("progress")},
+		},
+	}
+
+	raw := modelToSchemaJSON(context.Background(), model, &diags)
+	if diags.HasError() {
+		t.Fatalf("modelToSchemaJSON: %v", diags.Errors())
+	}
+	if !strings.Contains(string(raw), `"businessProcess":{"exposeAs":"progress"}`) {
+		t.Fatalf("business_process missing or misspelt in payload: %s", raw)
+	}
+
+	out := &TableResourceModel{}
+	schemaJSONToModel(context.Background(), raw, out, &diags)
+	if diags.HasError() {
+		t.Fatalf("schemaJSONToModel: %v", diags.Errors())
+	}
+	if out.PolymorphicLookup == nil || out.PolymorphicLookup.BusinessProcess == nil {
+		t.Fatal("business_process did not survive the round trip")
+	}
+	if got := out.PolymorphicLookup.BusinessProcess.ExposeAs.ValueString(); got != "progress" {
+		t.Errorf("expose_as = %q, want progress", got)
+	}
+}
+
+// TestBusinessProcessEmptyObjectRoundTrip: `business_process = {}` means
+// "yes, with the default name". It has to reach the API as an empty object
+// (not vanish) and read back with a NULL expose_as (not an empty string), or
+// the config `{}` would diff against state on every plan.
+func TestBusinessProcessEmptyObjectRoundTrip(t *testing.T) {
+	var diags diag.Diagnostics
+
+	model := &TableResourceModel{
+		RouteName:            types.StringValue("request"),
+		DataverseTable:       types.StringValue("sb_requests"),
+		DataverseLogicalName: types.StringValue("sb_request"),
+		PrimaryKey:           types.StringValue("sb_requestid"),
+		RequiredPermission:   types.StringValue("request"),
+		DefaultSelect:        stringsToTFList([]string{"sb_requestid"}),
+		LookupFields:         stringsToTFList([]string{"sb_name"}),
+		Fields:               fieldsJSONToModel(context.Background(), map[string]FieldHintJSON{}, &diags),
+		BusinessProcess:      &BusinessProcessModel{ExposeAs: types.StringNull()},
+		PolymorphicLookup:    &PolymorphicLookupModel{Field: types.StringNull()},
+	}
+
+	raw := modelToSchemaJSON(context.Background(), model, &diags)
+	if diags.HasError() {
+		t.Fatalf("modelToSchemaJSON: %v", diags.Errors())
+	}
+	if !strings.Contains(string(raw), `"businessProcess":{}`) {
+		t.Fatalf("table-level business_process = {} did not reach the API as an empty object: %s", raw)
+	}
+	if strings.Contains(string(raw), `"exposeAs"`) {
+		t.Fatalf("an unset expose_as was serialised: %s", raw)
+	}
+
+	out := &TableResourceModel{}
+	schemaJSONToModel(context.Background(), raw, out, &diags)
+	if diags.HasError() {
+		t.Fatalf("schemaJSONToModel: %v", diags.Errors())
+	}
+	if out.BusinessProcess == nil {
+		t.Fatal("table-level business_process did not survive the round trip")
+	}
+	if !out.BusinessProcess.ExposeAs.IsNull() {
+		t.Errorf("expose_as read back as %v, want null", out.BusinessProcess.ExposeAs)
+	}
+	if out.PolymorphicLookup != nil {
+		t.Errorf("a rule appeared from nowhere: %v", out.PolymorphicLookup)
 	}
 }

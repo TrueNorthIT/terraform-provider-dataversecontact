@@ -3,6 +3,7 @@ package resources
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -50,16 +51,17 @@ type TableResourceModel struct {
 	LookupFields         types.List   `tfsdk:"lookup_fields"`
 
 	// Optional attributes
-	Description          types.String `tfsdk:"description"`
-	Icon                 types.String `tfsdk:"icon"`
-	PermissionGroup      types.String `tfsdk:"permission_group"`
-	FetchXml             types.String `tfsdk:"fetch_xml"`
-	Aliases              types.List   `tfsdk:"aliases"`
-	LookupSearchContains types.List   `tfsdk:"lookup_search_contains"`
-	Filters              types.List   `tfsdk:"filters"`
-	PublicChoices        types.Bool   `tfsdk:"public_choices"`
-	PublicRead           types.Bool   `tfsdk:"public_read"`
-	PublicCreate         types.Bool   `tfsdk:"public_create"`
+	Description          types.String          `tfsdk:"description"`
+	Icon                 types.String          `tfsdk:"icon"`
+	PermissionGroup      types.String          `tfsdk:"permission_group"`
+	FetchXml             types.String          `tfsdk:"fetch_xml"`
+	Aliases              types.List            `tfsdk:"aliases"`
+	LookupSearchContains types.List            `tfsdk:"lookup_search_contains"`
+	Filters              types.List            `tfsdk:"filters"`
+	PublicChoices        types.Bool            `tfsdk:"public_choices"`
+	PublicRead           types.Bool            `tfsdk:"public_read"`
+	PublicCreate         types.Bool            `tfsdk:"public_create"`
+	BusinessProcess      *BusinessProcessModel `tfsdk:"business_process"`
 
 	// Fields map
 	Fields types.Map `tfsdk:"fields"`
@@ -107,12 +109,47 @@ type ParentTableModel struct {
 // PolymorphicLookupModel publishes every target of a polymorphic lookup as a
 // route of its own.
 type PolymorphicLookupModel struct {
-	Field              types.String `tfsdk:"field"`
-	RequiredPermission types.String `tfsdk:"required_permission"`
-	RoutePrefixStrip   types.String `tfsdk:"route_prefix_strip"`
-	TargetPrefix       types.String `tfsdk:"target_prefix"`
-	ExcludeTargets     types.List   `tfsdk:"exclude_targets"`
-	ReadOnly           types.Bool   `tfsdk:"read_only"`
+	Field              types.String          `tfsdk:"field"`
+	RequiredPermission types.String          `tfsdk:"required_permission"`
+	RoutePrefixStrip   types.String          `tfsdk:"route_prefix_strip"`
+	TargetPrefix       types.String          `tfsdk:"target_prefix"`
+	ExcludeTargets     types.List            `tfsdk:"exclude_targets"`
+	ReadOnly           types.Bool            `tfsdk:"read_only"`
+	BusinessProcess    *BusinessProcessModel `tfsdk:"business_process"`
+}
+
+// BusinessProcessModel asks the API to expose a business process flow on a
+// table's rows. Nested attribute rather than block, so it is nil when unset —
+// unlike a SingleNestedBlock, which Terraform always hands over non-nil.
+type BusinessProcessModel struct {
+	ExposeAs types.String `tfsdk:"expose_as"`
+}
+
+// exposeAsPattern is what the API accepts as a row property name.
+var exposeAsPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// businessProcessAttribute is the one schema both places use: the table's
+// own process, and each target's on a polymorphic rule.
+func businessProcessAttribute(where string) schema.SingleNestedAttribute {
+	return schema.SingleNestedAttribute{
+		Description: "Expose " + where + " business process flow on this table's rows. Every row " +
+			"then carries an object (`progress` unless expose_as renames it) with the process " +
+			"instance's state, active stage and ordered stages — or null when there is no process " +
+			"or no instance for the row. Derived by the API per request, read-only, not selectable. " +
+			"The API's Dataverse application user needs Read on workflow, processstage and the " +
+			"process's instance table.",
+		Optional: true,
+		Attributes: map[string]schema.Attribute{
+			"expose_as": schema.StringAttribute{
+				Description: "Property name on each row. Defaults to \"progress\". Must not collide " +
+					"with a field of this table.",
+				Optional: true,
+				Validators: []validator.String{
+					stringvalidator.RegexMatches(exposeAsPattern, "must be a plain identifier (letters, digits, underscores)"),
+				},
+			},
+		},
+	}
 }
 
 // ExpandModel is an expandable lookup into a related table.
@@ -285,6 +322,7 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
 			},
+			"business_process": businessProcessAttribute("this table's own"),
 			"public_create": schema.BoolAttribute{
 				Description: "Whether unauthenticated POST is allowed on the public tier.",
 				Optional:    true,
@@ -434,6 +472,7 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 							"publishes tables nobody reviewed should not also open them for writing.",
 						Optional: true,
 					},
+					"business_process": businessProcessAttribute("each target's"),
 				},
 			},
 			"expand": schema.ListNestedBlock{
@@ -532,6 +571,50 @@ func (r *TableResource) ValidateConfig(ctx context.Context, req resource.Validat
 					"lookup_table set on a non-lookup field",
 					fmt.Sprintf("Field %q has type %q, so its lookup_table is ignored. "+
 						"Either set type = \"lookup\" or remove lookup_table.", name, fieldType.ValueString()),
+				)
+			}
+		}
+	}
+
+	// A progress object lands on the row beside its fields, so a name that is
+	// also a field would overwrite that field on every read. The API drops such
+	// a binding with a warning in its logs; better to say so here, at plan time.
+	exposeAsOf := func(bp *BusinessProcessModel) string {
+		if bp == nil {
+			return ""
+		}
+		if bp.ExposeAs.IsNull() || bp.ExposeAs.IsUnknown() {
+			return "progress"
+		}
+		return bp.ExposeAs.ValueString()
+	}
+	own := exposeAsOf(config.BusinessProcess)
+	via := ""
+	if config.PolymorphicLookup != nil {
+		via = exposeAsOf(config.PolymorphicLookup.BusinessProcess)
+	}
+	if own != "" && own == via {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("polymorphic_lookup").AtName("business_process").AtName("expose_as"),
+			"Two business processes under one name",
+			fmt.Sprintf("Both business_process and polymorphic_lookup.business_process would expose %q. "+
+				"Give one of them a different expose_as.", own),
+		)
+	}
+	if !config.Fields.IsNull() && !config.Fields.IsUnknown() {
+		for name := range config.Fields.Elements() {
+			if name == own {
+				resp.Diagnostics.AddAttributeWarning(
+					path.Root("business_process").AtName("expose_as"),
+					"business_process would overwrite a field",
+					fmt.Sprintf("%q is also a field on this table; the API will not expose the process under that name.", name),
+				)
+			}
+			if name == via {
+				resp.Diagnostics.AddAttributeWarning(
+					path.Root("polymorphic_lookup").AtName("business_process").AtName("expose_as"),
+					"business_process would overwrite a field",
+					fmt.Sprintf("%q is also a field on this table; the API will not expose the process under that name.", name),
 				)
 			}
 		}
