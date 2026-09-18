@@ -153,12 +153,12 @@ func TestDeleteTable(t *testing.T) {
 // longer had and no retry could clear it.
 func TestDeleteTableAlreadyGone(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/v2/_admin/default/table-manager/unpublish":
+		switch r.URL.Path {
+		case "/api/v2/_admin/default/table-manager/unpublish":
 			_ = json.NewEncoder(w).Encode(UnpublishResponse{})
-		case r.URL.Path == "/api/v2/_admin/default/table-manager/remove":
+		case "/api/v2/_admin/default/table-manager/remove":
 			_ = json.NewEncoder(w).Encode(RemoveResponse{Removed: []string{}})
-		case r.URL.Path == "/api/v2/_admin/default/table-manager/recycled/gone":
+		case "/api/v2/_admin/default/table-manager/recycled/gone":
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"error":"Not Found","message":"Table \"gone\" not found in recycle bin"}`))
 		default:
@@ -178,12 +178,12 @@ func TestDeleteTableAlreadyGone(t *testing.T) {
 // under us and the error is real.
 func TestDeleteTableBinnedThenMissingErrors(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/v2/_admin/default/table-manager/unpublish":
+		switch r.URL.Path {
+		case "/api/v2/_admin/default/table-manager/unpublish":
 			_ = json.NewEncoder(w).Encode(UnpublishResponse{})
-		case r.URL.Path == "/api/v2/_admin/default/table-manager/remove":
+		case "/api/v2/_admin/default/table-manager/remove":
 			_ = json.NewEncoder(w).Encode(RemoveResponse{Removed: []string{"raced"}})
-		case r.URL.Path == "/api/v2/_admin/default/table-manager/recycled/raced":
+		case "/api/v2/_admin/default/table-manager/recycled/raced":
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"error":"Not Found","message":"Table \"raced\" not found in recycle bin"}`))
 		default:
