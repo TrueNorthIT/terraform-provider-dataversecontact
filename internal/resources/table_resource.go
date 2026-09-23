@@ -12,7 +12,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -166,6 +165,28 @@ type ExpandFieldModel struct {
 	Description types.String `tfsdk:"description"`
 }
 
+// fieldCountFromFields plans field_count as the size of fields. Carrying the
+// prior value forward (UseStateForUnknown) goes stale whenever a field is
+// added or removed, and apply then fails with an inconsistent result.
+type fieldCountFromFields struct{}
+
+func (m fieldCountFromFields) Description(_ context.Context) string {
+	return "Plans field_count as the number of entries in fields."
+}
+
+func (m fieldCountFromFields) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (m fieldCountFromFields) PlanModifyInt64(ctx context.Context, req planmodifier.Int64Request, resp *planmodifier.Int64Response) {
+	var fields types.Map
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("fields"), &fields)...)
+	if resp.Diagnostics.HasError() || fields.IsUnknown() {
+		return
+	}
+	resp.PlanValue = types.Int64Value(int64(len(fields.Elements())))
+}
+
 // ── Resource interface ──────────────────────────────────────────────────
 
 func NewTableResource() resource.Resource {
@@ -240,7 +261,7 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Description: "Number of fields defined in the schema.",
 				Computed:    true,
 				PlanModifiers: []planmodifier.Int64{
-					int64planmodifier.UseStateForUnknown(),
+					fieldCountFromFields{},
 				},
 			},
 
