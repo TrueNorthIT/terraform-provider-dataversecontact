@@ -2,10 +2,12 @@ package resources
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -365,5 +367,44 @@ func TestBusinessProcessEmptyObjectRoundTrip(t *testing.T) {
 	}
 	if out.PolymorphicLookup != nil {
 		t.Errorf("a rule appeared from nowhere: %v", out.PolymorphicLookup)
+	}
+}
+
+// aliases and lookup_search_contains come back from the API as [] when unset.
+// They must read as a known empty list, and be Computed, so a config that omits
+// them and one that writes [] both apply without an inconsistent-result error.
+func TestEmptyListAttrsReadAsEmptyList(t *testing.T) {
+	ctx := context.Background()
+	var diags diag.Diagnostics
+
+	raw, err := json.Marshal(SchemaHintJSON{
+		RouteName:      "contact",
+		DataverseTable: "contacts",
+		PrimaryKey:     "contactid",
+		DefaultSelect:  []string{"contactid"},
+		LookupFields:   []string{"fullname"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := &TableResourceModel{}
+	schemaJSONToModel(ctx, raw, model, &diags)
+	if diags.HasError() {
+		t.Fatalf("schemaJSONToModel: %v", diags.Errors())
+	}
+
+	var schemaResp resource.SchemaResponse
+	NewTableResource().Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+
+	for name, got := range map[string]types.List{
+		"aliases":                model.Aliases,
+		"lookup_search_contains": model.LookupSearchContains,
+	} {
+		if got.IsNull() || got.IsUnknown() || len(got.Elements()) != 0 {
+			t.Errorf("%s = %v, want []", name, got)
+		}
+		if !schemaResp.Schema.Attributes[name].IsComputed() {
+			t.Errorf("%s is not Computed", name)
+		}
 	}
 }
