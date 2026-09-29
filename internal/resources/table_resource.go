@@ -187,6 +187,41 @@ func (m fieldCountFromFields) PlanModifyInt64(ctx context.Context, req planmodif
 	resp.PlanValue = types.Int64Value(int64(len(fields.Elements())))
 }
 
+// bindFieldFromState carries a field's derived bind_field forward from state
+// when bind_field is unset and the field's type and lookup_table are
+// unchanged. The API derives it from the attribute's SchemaName, so it only
+// moves when the field itself does; otherwise it stays unknown until apply.
+type bindFieldFromState struct{}
+
+func (m bindFieldFromState) Description(_ context.Context) string {
+	return "Keeps the derived bind_field from state while the field's type and lookup_table are unchanged."
+}
+
+func (m bindFieldFromState) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (m bindFieldFromState) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
+	if !req.ConfigValue.IsNull() || !req.PlanValue.IsUnknown() || req.State.Raw.IsNull() {
+		return
+	}
+
+	field := req.Path.ParentPath()
+	for _, name := range []string{"type", "lookup_table"} {
+		var planned, prior types.String
+		resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, field.AtName(name), &planned)...)
+		resp.Diagnostics.Append(req.State.GetAttribute(ctx, field.AtName(name), &prior)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		// A null prior type means the field is new to this table.
+		if (name == "type" && prior.IsNull()) || !planned.Equal(prior) {
+			return
+		}
+	}
+	resp.PlanValue = req.StateValue
+}
+
 // ── Resource interface ──────────────────────────────────────────────────
 
 func NewTableResource() resource.Resource {
@@ -382,8 +417,13 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 							Optional:    true,
 						},
 						"bind_field": schema.StringAttribute{
-							Description: "For aliased fields: the navigation property for @odata.bind writes.",
-							Optional:    true,
+							Description: "For aliased fields: the navigation property for @odata.bind writes. " +
+								"If omitted, the API derives it from the attribute's Dataverse SchemaName.",
+							Optional: true,
+							Computed: true,
+							PlanModifiers: []planmodifier.String{
+								bindFieldFromState{},
+							},
 						},
 					},
 				},

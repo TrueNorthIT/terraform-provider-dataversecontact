@@ -259,7 +259,7 @@ Required:
 
 Optional:
 
-- `bind_field` (String) For aliased fields: the navigation property for @odata.bind writes.
+- `bind_field` (String) For aliased fields: the navigation property for @odata.bind writes. If omitted, the API derives it from the attribute's Dataverse SchemaName.
 - `lookup_table` (String) For lookup fields: the route name of the target table.
 - `read_only` (Boolean) If true, field is read-only (not writable via PATCH).
 - `value_field` (String) For polymorphic lookups: the underlying OData value column name.
