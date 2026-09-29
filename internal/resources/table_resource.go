@@ -349,14 +349,19 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Description: "FetchXML template for custom list queries.",
 				Optional:    true,
 			},
+			// aliases and lookup_search_contains read back as [] when the API
+			// has none, so they are Computed: omitting them or writing [] must
+			// both apply without an inconsistent-result error.
 			"aliases": schema.ListAttribute{
 				Description: "Optional route aliases.",
 				Optional:    true,
+				Computed:    true,
 				ElementType: types.StringType,
 			},
 			"lookup_search_contains": schema.ListAttribute{
 				Description: "Lookup fields that use 'contains' instead of 'startswith'.",
 				Optional:    true,
+				Computed:    true,
 				ElementType: types.StringType,
 			},
 			"filters": schema.ListAttribute{

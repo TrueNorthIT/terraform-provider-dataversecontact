@@ -248,7 +248,7 @@ func schemaJSONToModel(ctx context.Context, raw json.RawMessage, model *TableRes
 	// Simple lists
 	model.DefaultSelect = stringsToTFList(hint.DefaultSelect)
 	model.LookupFields = stringsToTFList(hint.LookupFields)
-	model.Aliases = stringsToTFListOrNull(hint.Aliases)
+	model.Aliases = stringsToTFList(hint.Aliases)
 	model.LookupSearchContains = stringsToTFList(hint.LookupSearchContains)
 	model.Filters = stringsToTFList(hint.Filters)
 
