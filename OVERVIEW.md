@@ -43,7 +43,7 @@ which writes `published/<scope>/defaults.json` to blob storage. That file is the
 **only** way a Terraform-provisioned scope declares baseline permissions, and it
 is very much live: the API merges it into table config at registry build
 (`defaultActions`) and `getDefaultPermissions(scope)` resolves it on every
-request, unioned with per-user `cr_apipermission` rows.
+request, unioned with per-user `cpa_apipermission` rows.
 
 So it is required, not vestigial. **A blob-only scope with no published
 `defaults.json` grants nothing** — every route answers
