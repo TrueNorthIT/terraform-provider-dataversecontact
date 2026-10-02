@@ -187,7 +187,8 @@ func (r *PermissionsSyncResource) Schema(_ context.Context, _ resource.SchemaReq
 				Description: "The contact column holding the address people sign in with, as a logical name " +
 					"(e.g. \"emailaddress2\" or \"cr123_portalemail\"). A signed-in caller's verified email is " +
 					"matched against it, self-registration writes the address there, and no update through the " +
-					"API can change it. Omit to keep \"emailaddress1\". The column must exist on the contact " +
+					"API can change it. Omit to use the API's default: its CONTACT_EMAIL_COLUMN setting, else " +
+					"\"emailaddress1\". The column must exist on the contact " +
 					"table, and existing contacts need their address in it before you switch. Published as " +
 					"`contactEmailColumn` in the scope's defaults.json.",
 				Optional: true,

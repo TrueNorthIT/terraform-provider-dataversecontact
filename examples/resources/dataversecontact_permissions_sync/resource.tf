@@ -50,7 +50,8 @@ resource "dataversecontact_permissions_sync" "default" {
   #   }
   #
   # For scopes whose contacts keep the address people sign in with somewhere
-  # other than emailaddress1 (omit to keep emailaddress1):
+  # else (omit to use the API's default: CONTACT_EMAIL_COLUMN, else
+  # emailaddress1):
   #
   #   contact_email_column = "emailaddress2"
 }
