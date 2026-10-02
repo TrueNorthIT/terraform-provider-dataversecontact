@@ -48,6 +48,12 @@ resource "dataversecontact_permissions_sync" "default" {
   #     strategy     = "domain-list"
   #     domain_field = "new_portaldomains"
   #   }
+  #
+  # For scopes whose contacts keep the address people sign in with somewhere
+  # else (omit to use the API's default: CONTACT_EMAIL_COLUMN, else
+  # emailaddress1):
+  #
+  #   contact_email_column = "emailaddress2"
 }
 
 output "permission_count" {

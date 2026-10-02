@@ -14,16 +14,19 @@ import (
 // self-registration for citizen-facing scopes. companyModel is optional —
 // nil publishes the classic parent-account (multi-contact) model. join is
 // optional — nil means registration just provisions an unlinked contact.
-func (c *Client) PublishDefaults(ctx context.Context, scope string, permissions map[string][]string, allowSelfRegister bool, companyModel *CompanyModel, join *JoinConfig) (*PublishDefaultsResponse, error) {
+// contactEmailColumn names the contact column people sign in with — empty
+// leaves it out, so the API uses emailaddress1.
+func (c *Client) PublishDefaults(ctx context.Context, scope string, permissions map[string][]string, allowSelfRegister bool, companyModel *CompanyModel, join *JoinConfig, contactEmailColumn string) (*PublishDefaultsResponse, error) {
 	url := c.adminURL(scope, "table-manager/defaults")
 	if permissions == nil {
 		permissions = map[string][]string{}
 	}
 	body := PublishDefaultsRequest{
-		Permissions:       permissions,
-		AllowSelfRegister: allowSelfRegister,
-		CompanyModel:      companyModel,
-		Join:              join,
+		Permissions:        permissions,
+		AllowSelfRegister:  allowSelfRegister,
+		CompanyModel:       companyModel,
+		Join:               join,
+		ContactEmailColumn: contactEmailColumn,
 	}
 	var resp PublishDefaultsResponse
 	if err := c.doJSON(ctx, "PUT", url, body, &resp); err != nil {
