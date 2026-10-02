@@ -179,6 +179,9 @@ type PublishDefaultsRequest struct {
 	AllowSelfRegister bool                `json:"allowSelfRegister"`
 	CompanyModel      *CompanyModel       `json:"companyModel,omitempty"`
 	Join              *JoinConfig         `json:"join,omitempty"`
+	// The contact column people sign in with. Empty is omitted, and the API
+	// then uses emailaddress1.
+	ContactEmailColumn string `json:"contactEmailColumn,omitempty"`
 }
 
 // JoinConfig mirrors the API's per-scope self-serve join config. Omitted (nil)

@@ -63,6 +63,11 @@ resource "dataversecontact_permissions_sync" "default" {
   #     strategy     = "domain-list"
   #     domain_field = "new_portaldomains"
   #   }
+  #
+  # For scopes whose contacts keep the address people sign in with somewhere
+  # other than emailaddress1 (omit to keep emailaddress1):
+  #
+  #   contact_email_column = "emailaddress2"
 }
 
 output "permission_count" {
@@ -81,6 +86,7 @@ output "permission_count" {
 
 - `allow_self_register` (Boolean) Whether contacts may self-register for this scope. Published as `allowSelfRegister` in the scope's defaults.json. Defaults to false.
 - `company_model` (Attributes) How this scope resolves a person to the companies they may act as. Omit for the classic parent-account (multi-contact) model. Published as `companyModel` in the scope's defaults.json. (see [below for nested schema](#nestedatt--company_model))
+- `contact_email_column` (String) The contact column holding the address people sign in with, as a logical name (e.g. "emailaddress2" or "cr123_portalemail"). A signed-in caller's verified email is matched against it, self-registration writes the address there, and no update through the API can change it. Omit to keep "emailaddress1". The column must exist on the contact table, and existing contacts need their address in it before you switch. Published as `contactEmailColumn` in the scope's defaults.json.
 - `default_permissions` (Map of List of String) The baseline permissions granted to every authenticated contact, keyed by route name. Each value is the list of permission tokens for that route (e.g. ["team", "write", "create"]). Known tokens: the read tiers "me" (rows reachable from the caller's own contact via the table's contact join), "team" and "all" (every row), plus "write" (update within the granted read tier), "write:all" and "create". Published as the `permissions` object of the scope's defaults.json.
 - `join` (Attributes) How a signed-in caller with no Dataverse contact yet may self-join companies. Omit to just provision an unlinked contact for an officer to link. Published as `join` in the scope's defaults.json. (see [below for nested schema](#nestedatt--join))
 - `triggers` (Map of String) A map of trigger values. When any value changes, permissions are re-published. Use this to trigger a re-publish when table schemas change.

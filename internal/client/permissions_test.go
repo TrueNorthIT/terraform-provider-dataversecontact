@@ -23,7 +23,7 @@ func TestPublishDefaults(t *testing.T) {
 
 	c := NewClient(server.URL, "key")
 	perms := map[string][]string{"case": {"team", "write", "create"}}
-	resp, err := c.PublishDefaults(context.Background(), "default", perms, true, nil, nil)
+	resp, err := c.PublishDefaults(context.Background(), "default", perms, true, nil, nil, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestPublishDefaultsCompanyModel(t *testing.T) {
 		Strategy:           "associated-accounts",
 		AssociatedAccounts: &AssociatedAccountsQuery{Relationship: "cr_contact_accounts"},
 	}
-	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, cm, nil); err != nil {
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, cm, nil, ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -91,7 +91,7 @@ func TestPublishDefaultsJoin(t *testing.T) {
 
 	c := NewClient(server.URL, "key")
 	join := &JoinConfig{Strategy: "domain-list", DomainField: "new_portaldomains", RequireMatch: true}
-	if _, err := c.PublishDefaults(context.Background(), "default", nil, true, nil, join); err != nil {
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, true, nil, join, ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -120,11 +120,52 @@ func TestPublishDefaultsNilPermissions(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient(server.URL, "key")
-	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil, nil); err != nil {
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil, nil, ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if _, ok := gotBody["permissions"]; !ok {
 		t.Errorf("expected permissions key to be present even when nil")
+	}
+}
+
+func TestPublishDefaultsContactEmailColumn(t *testing.T) {
+	var gotBody PublishDefaultsRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "key")
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil, nil, "emailaddress2"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotBody.ContactEmailColumn != "emailaddress2" {
+		t.Errorf("expected contactEmailColumn emailaddress2, got %q", gotBody.ContactEmailColumn)
+	}
+}
+
+// Unset, the key is left out, so the API keeps signing people in with emailaddress1.
+func TestPublishDefaultsOmitsUnsetContactEmailColumn(t *testing.T) {
+	var gotBody map[string]json.RawMessage
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "key")
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil, nil, ""); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, ok := gotBody["contactEmailColumn"]; ok {
+		t.Errorf("expected no contactEmailColumn key when unset, got %s", gotBody["contactEmailColumn"])
 	}
 }

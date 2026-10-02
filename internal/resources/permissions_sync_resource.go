@@ -3,6 +3,7 @@ package resources
 import (
 	"context"
 	"fmt"
+	"regexp"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -33,6 +34,7 @@ type PermissionsSyncResourceModel struct {
 	AllowSelfRegister  types.Bool         `tfsdk:"allow_self_register"`
 	CompanyModel       *CompanyModelModel `tfsdk:"company_model"`
 	Join               *JoinModel         `tfsdk:"join"`
+	ContactEmailColumn types.String       `tfsdk:"contact_email_column"`
 	PermissionCount    types.Int64        `tfsdk:"permission_count"`
 }
 
@@ -181,6 +183,21 @@ func (r *PermissionsSyncResource) Schema(_ context.Context, _ resource.SchemaReq
 					},
 				},
 			},
+			"contact_email_column": schema.StringAttribute{
+				Description: "The contact column holding the address people sign in with, as a logical name " +
+					"(e.g. \"emailaddress2\" or \"cr123_portalemail\"). A signed-in caller's verified email is " +
+					"matched against it, self-registration writes the address there, and no update through the " +
+					"API can change it. Omit to keep \"emailaddress1\". The column must exist on the contact " +
+					"table, and existing contacts need their address in it before you switch. Published as " +
+					"`contactEmailColumn` in the scope's defaults.json.",
+				Optional: true,
+				Validators: []validator.String{
+					stringvalidator.RegexMatches(
+						regexp.MustCompile(`^[a-z][a-z0-9_]*$`),
+						"must be a contact column's logical name: lowercase letters, digits and underscores, e.g. \"emailaddress2\"",
+					),
+				},
+			},
 			"permission_count": schema.Int64Attribute{
 				Description: "The number of routes with published baseline permissions.",
 				Computed:    true,
@@ -268,16 +285,18 @@ func (r *PermissionsSyncResource) publish(ctx context.Context, plan *Permissions
 	allowSelfRegister := plan.AllowSelfRegister.ValueBool()
 	companyModel := buildCompanyModel(plan.CompanyModel)
 	join := buildJoin(plan.Join)
+	contactEmailColumn := plan.ContactEmailColumn.ValueString()
 
 	tflog.Info(ctx, "Publishing scope default permissions", map[string]interface{}{
-		"scope":               scope,
-		"routes":              len(permissions),
-		"allow_self_register": allowSelfRegister,
-		"company_model":       companyModel != nil,
-		"join":                join != nil,
+		"scope":                scope,
+		"routes":               len(permissions),
+		"allow_self_register":  allowSelfRegister,
+		"company_model":        companyModel != nil,
+		"join":                 join != nil,
+		"contact_email_column": contactEmailColumn,
 	})
 
-	if _, err := r.client.PublishDefaults(ctx, scope, permissions, allowSelfRegister, companyModel, join); err != nil {
+	if _, err := r.client.PublishDefaults(ctx, scope, permissions, allowSelfRegister, companyModel, join, contactEmailColumn); err != nil {
 		resp.AddError("Failed to publish permissions", err.Error())
 		return
 	}
