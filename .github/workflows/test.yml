@@ -55,7 +55,16 @@ jobs:
         with:
           terraform_wrapper: false
       - run: go mod download
-      - run: go test ./... -v -timeout 30m
+      - run: >-
+          go test ./... -v -timeout 30m
+          -coverpkg=./internal/client/...,./internal/resources/...,./internal/datasources/...,./internal/provider/...
+          -coverprofile=coverage.out
+      # Provider code only; the test fake is excluded above.
+      - name: Coverage at least 90%
+        run: |
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {sub("%", "", $3); print $3}')
+          echo "Coverage: ${total}%" >> "$GITHUB_STEP_SUMMARY"
+          awk -v t="$total" 'BEGIN { if (t < 90) { print "coverage " t "% is below 90%"; exit 1 } }'
 
   docs:
     name: Docs up to date

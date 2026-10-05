@@ -123,6 +123,8 @@ descriptions live in the Go schemas under `internal/resources/` and
 - **Contract tests** check the client types, and the fake, against real API responses in
   [`internal/testdata/contract`](internal/testdata/contract/README.md). When the API changes a
   response, update the fixture first.
+- CI fails if coverage of provider code (excluding the fake) drops below **90%**. Failure
+  paths are tested by making the fake fail a request: `s.SetFail("PUT table-manager/case", 500)`.
 
 Architecture notes live in [OVERVIEW.md](OVERVIEW.md).
 

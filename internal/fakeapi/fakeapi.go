@@ -67,6 +67,12 @@ type Server struct {
 	// instead of publishing that route.
 	PublishErrors map[string]string
 
+	// Fail makes requests answer with a status code instead, keyed by method
+	// and the path after the scope, e.g. "PUT table-manager/case" or
+	// "GET scopes". For the error paths a failed apply, refresh or destroy
+	// takes.
+	Fail map[string]int
+
 	tables     map[string]map[string]map[string]any // scope → route → published schema
 	drafts     map[string]map[string]map[string]any // scope → route → draft schema
 	recycled   map[string]map[string]map[string]any
@@ -145,6 +151,25 @@ func (s *Server) DeleteTable(scope, route string) {
 	delete(s.recycled[scope], route)
 }
 
+// SetFail makes requests matching key ("METHOD path-after-scope") answer
+// with status until ClearFail. Use it between steps; set Fail directly only
+// before the first.
+func (s *Server) SetFail(key string, status int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Fail == nil {
+		s.Fail = map[string]int{}
+	}
+	s.Fail[key] = status
+}
+
+// ClearFail removes every injected failure.
+func (s *Server) ClearFail() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Fail = nil
+}
+
 // DeleteCustomApi is DeleteTable for custom APIs.
 func (s *Server) DeleteCustomApi(scope, route string) {
 	s.mu.Lock()
@@ -178,11 +203,18 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Not found")
 		return
 	}
+	scope, path, _ := strings.Cut(rest, "/")
+	if rest == "scopes" {
+		path = "scopes"
+	}
+	if status, fail := s.Fail[r.Method+" "+path]; fail {
+		writeError(w, status, "Injected failure")
+		return
+	}
 	if rest == "scopes" && r.Method == http.MethodGet {
 		s.scopes(w)
 		return
 	}
-	scope, path, _ := strings.Cut(rest, "/")
 
 	var body map[string]any
 	if r.Body != nil && r.ContentLength != 0 {
