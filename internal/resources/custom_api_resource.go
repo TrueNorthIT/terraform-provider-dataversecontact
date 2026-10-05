@@ -161,8 +161,13 @@ func (r *CustomApiResource) Read(ctx context.Context, req resource.ReadRequest, 
 	scope := state.Scope.ValueString()
 	routeName := state.RouteName.ValueString()
 
-	r.readIntoModel(ctx, scope, routeName, &state, &resp.Diagnostics)
+	found := r.readIntoModel(ctx, scope, routeName, &state, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+	if !found {
+		// Deleted outside Terraform: drop it so the next plan re-creates it.
+		resp.State.RemoveResource(ctx)
 		return
 	}
 
@@ -234,16 +239,16 @@ func (r *CustomApiResource) ImportState(ctx context.Context, req resource.Import
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
 }
 
-func (r *CustomApiResource) readIntoModel(ctx context.Context, scope, routeName string, model *CustomApiResourceModel, diagnostics *diag.Diagnostics) {
+func (r *CustomApiResource) readIntoModel(ctx context.Context, scope, routeName string, model *CustomApiResourceModel, diagnostics *diag.Diagnostics) (found bool) {
 	apiResp, err := r.client.GetCustomApi(ctx, scope, routeName)
 	if err != nil {
 		if client.IsNotFound(err) {
 			diagnostics.AddWarning("Custom API not found",
 				fmt.Sprintf("Custom API %s/%s not found, removing from state", scope, routeName))
-			return
+			return false
 		}
 		diagnostics.AddError("Failed to read custom API", err.Error())
-		return
+		return false
 	}
 
 	model.ID = types.StringValue(fmt.Sprintf("%s/%s", scope, routeName))
@@ -275,4 +280,5 @@ func (r *CustomApiResource) readIntoModel(ctx context.Context, scope, routeName 
 	if model.SchemaJSON.IsNull() || model.SchemaJSON.IsUnknown() {
 		model.SchemaJSON = types.StringValue(string(apiResp.Schema))
 	}
+	return true
 }

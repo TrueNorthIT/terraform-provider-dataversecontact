@@ -1,0 +1,11 @@
+{
+  "message": "Draft saved",
+  "draft": {
+    "routeName": "expand-calendar",
+    "entity": "ExpandCalendar",
+    "scope": "default",
+    "updatedAt": "2026-10-05T12:00:00.000Z",
+    "updatedBy": "terraform@connection-key",
+    "changeType": "modified"
+  }
+}

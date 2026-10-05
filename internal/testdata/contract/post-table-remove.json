@@ -1,0 +1,12 @@
+{
+  "message": "Removed 1 table(s) to recycle bin",
+  "removed": [
+    "case"
+  ],
+  "errors": [
+    {
+      "routeName": "contact",
+      "error": "No published or draft schema found"
+    }
+  ]
+}

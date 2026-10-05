@@ -7,3 +7,4 @@ dist/
 *.tfstate.backup
 *.tfplan
 .terraform.lock.hcl
+coverage.out

@@ -1,0 +1,12 @@
+{
+  "message": "Published 1 custom API(s)",
+  "published": [
+    "expand-calendar"
+  ],
+  "errors": [
+    {
+      "routeName": "other",
+      "error": "Draft blob not found"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "message": "Updated default permissions for scope \"default\"",
+  "scope": "default",
+  "defaults": {
+    "permissions": {
+      "case": [
+        "me",
+        "write",
+        "create"
+      ]
+    },
+    "allowSelfRegister": false
+  }
+}

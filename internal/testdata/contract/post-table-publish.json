@@ -1,0 +1,26 @@
+{
+  "message": "Published 1 table(s)",
+  "published": [
+    "case"
+  ],
+  "errors": [
+    {
+      "routeName": "contact",
+      "error": "Draft blob not found"
+    }
+  ],
+  "validation": {
+    "case": {
+      "valid": true,
+      "errors": [],
+      "warnings": [
+        {
+          "severity": "warning",
+          "field": "fields.prioritycode",
+          "code": "TYPE_MISMATCH",
+          "message": "Field \"prioritycode\" is declared as string but Dataverse type is Picklist"
+        }
+      ]
+    }
+  }
+}

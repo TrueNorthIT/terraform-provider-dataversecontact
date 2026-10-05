@@ -1,0 +1,24 @@
+{
+  "scopes": [
+    "case-portal",
+    "default"
+  ],
+  "scopeAuth": [
+    {
+      "name": "case-portal",
+      "authority": "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000",
+      "apiScope": "https://example.crm11.dynamics.com/.default"
+    },
+    {
+      "name": "default",
+      "authority": "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000",
+      "apiScope": "https://example.crm11.dynamics.com/.default"
+    }
+  ],
+  "adminOAuth": {
+    "enabled": false
+  },
+  "solution": {
+    "version": "2.3.0.0"
+  }
+}

@@ -49,8 +49,22 @@ jobs:
         with:
           go-version-file: "go.mod"
           cache: true
+      # The acceptance tests in internal/provider drive a real terraform
+      # binary against internal/fakeapi, with no secrets.
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
       - run: go mod download
-      - run: go test ./... -v -timeout 30m
+      - run: >-
+          go test ./... -v -timeout 30m
+          -coverpkg=./internal/client/...,./internal/resources/...,./internal/datasources/...,./internal/provider/...
+          -coverprofile=coverage.out
+      # Provider code only; the test fake is excluded above.
+      - name: Coverage at least 90%
+        run: |
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {sub("%", "", $3); print $3}')
+          echo "Coverage: ${total}%" >> "$GITHUB_STEP_SUMMARY"
+          awk -v t="$total" 'BEGIN { if (t < 90) { print "coverage " t "% is below 90%"; exit 1 } }'
 
   docs:
     name: Docs up to date
@@ -84,7 +98,8 @@ jobs:
           terraform_wrapper: false
       - run: ./scripts/validate-examples.sh
 
-  # Acceptance tests run against a real API instance
+  # Reserved for tests against a real API instance (resource.Test, gated on
+  # TF_ACC). There are none yet, so this re-runs the fake-backed suite.
   # Only runs on main branch pushes (not PRs) to avoid exposing secrets
   acceptance:
     name: Acceptance Tests
@@ -104,5 +119,8 @@ jobs:
         with:
           go-version-file: "go.mod"
           cache: true
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
       - run: go mod download
       - run: go test ./... -v -timeout 120m

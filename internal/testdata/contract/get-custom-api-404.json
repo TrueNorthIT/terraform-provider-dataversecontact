@@ -1,0 +1,5 @@
+{
+  "error": "Not Found",
+  "message": "Unknown custom API: no_such_api_xyz",
+  "statusCode": 404
+}

@@ -1,0 +1,238 @@
+{
+  "definitions": [
+    {
+      "routeName": "case",
+      "source": "published",
+      "description": "Support cases \u2014 tickets you raised (me) and your company's (team)",
+      "icon": null,
+      "dataverseTable": "incidents",
+      "dataverseLogicalName": "incident",
+      "requiredPermission": "case",
+      "permissionGroup": null,
+      "primaryKey": "incidentid",
+      "aliases": [
+        "cases",
+        "incidents",
+        "tickets"
+      ],
+      "defaultSelect": [
+        "incidentid",
+        "title",
+        "ticketnumber",
+        "prioritycode",
+        "statecode",
+        "statuscode",
+        "description",
+        "createdon",
+        "modifiedon"
+      ],
+      "contactJoinPath": [
+        {
+          "table": "contacts",
+          "from": "primarycontactid",
+          "key": "contactid"
+        }
+      ],
+      "alternateContactJoinPaths": null,
+      "teamJoinPath": [
+        {
+          "table": "accounts",
+          "from": "customerid_account",
+          "key": "accountid"
+        }
+      ],
+      "filters": [
+        "statecode eq 0"
+      ],
+      "parentTable": null,
+      "createDefaults": [
+        {
+          "field": "primarycontactid",
+          "bindTo": "contact",
+          "entitySet": "contacts"
+        },
+        {
+          "field": "customerid_account",
+          "bindTo": "account",
+          "entitySet": "accounts"
+        }
+      ],
+      "lookupFields": [
+        "title",
+        "ticketnumber"
+      ],
+      "lookupSearchContains": [
+        "title",
+        "ticketnumber"
+      ],
+      "publicChoices": true,
+      "publicRead": false,
+      "expands": [],
+      "fields": {
+        "createdon": {
+          "type": "datetime",
+          "description": "Date created",
+          "readOnly": true
+        },
+        "customerid": {
+          "type": "lookup",
+          "description": "Customer (account)",
+          "readOnly": true
+        },
+        "description": {
+          "type": "string",
+          "description": "Details"
+        },
+        "incidentid": {
+          "type": "string",
+          "description": "Unique case identifier",
+          "readOnly": true
+        },
+        "modifiedon": {
+          "type": "datetime",
+          "description": "Date last modified",
+          "readOnly": true
+        },
+        "primarycontactid": {
+          "type": "lookup",
+          "description": "Primary contact",
+          "readOnly": true,
+          "lookupTable": "contact"
+        },
+        "prioritycode": {
+          "type": "choice",
+          "description": "Priority"
+        },
+        "statecode": {
+          "type": "choice",
+          "description": "Status (Active/Resolved/Cancelled)",
+          "readOnly": true
+        },
+        "statuscode": {
+          "type": "choice",
+          "description": "Status reason",
+          "readOnly": true
+        },
+        "ticketnumber": {
+          "type": "string",
+          "description": "Case number",
+          "readOnly": true
+        },
+        "title": {
+          "type": "string",
+          "description": "Summary"
+        }
+      },
+      "fieldCount": 11,
+      "fetchXml": null
+    },
+    {
+      "routeName": "projectnotes",
+      "source": "published",
+      "description": "Delivery notes/updates on your projects",
+      "icon": null,
+      "dataverseTable": "annotations",
+      "dataverseLogicalName": "annotation",
+      "requiredPermission": "project",
+      "permissionGroup": "project",
+      "primaryKey": "annotationid",
+      "aliases": [
+        "projectnote"
+      ],
+      "defaultSelect": [
+        "annotationid",
+        "subject",
+        "notetext",
+        "objectid",
+        "objecttypecode",
+        "createdon",
+        "modifiedon"
+      ],
+      "contactJoinPath": [
+        {
+          "table": "msdyn_projects",
+          "from": "objectid_msdyn_project",
+          "key": "msdyn_projectid"
+        },
+        {
+          "table": "accounts",
+          "from": "msdyn_customer",
+          "key": "accountid"
+        },
+        {
+          "table": "contacts",
+          "from": "primarycontactid",
+          "key": "contactid"
+        }
+      ],
+      "alternateContactJoinPaths": null,
+      "teamJoinPath": [
+        {
+          "table": "msdyn_projects",
+          "from": "objectid_msdyn_project",
+          "key": "msdyn_projectid"
+        },
+        {
+          "table": "accounts",
+          "from": "msdyn_customer",
+          "key": "accountid"
+        }
+      ],
+      "filters": [
+        "objecttypecode eq 'msdyn_project'"
+      ],
+      "parentTable": {
+        "table": "project",
+        "navigationProperty": "objectid_msdyn_project"
+      },
+      "createDefaults": null,
+      "lookupFields": [
+        "subject"
+      ],
+      "lookupSearchContains": [
+        "subject"
+      ],
+      "publicChoices": true,
+      "publicRead": false,
+      "expands": [],
+      "fields": {
+        "annotationid": {
+          "type": "string",
+          "description": "Unique note identifier",
+          "readOnly": true
+        },
+        "createdon": {
+          "type": "datetime",
+          "description": "Date created",
+          "readOnly": true
+        },
+        "modifiedon": {
+          "type": "datetime",
+          "description": "Date last modified",
+          "readOnly": true
+        },
+        "notetext": {
+          "type": "string",
+          "description": "Note text"
+        },
+        "objectid": {
+          "type": "lookup",
+          "description": "Regarding project",
+          "lookupTable": "project",
+          "bindField": "objectid_msdyn_project"
+        },
+        "objecttypecode": {
+          "type": "string",
+          "description": "Regarding entity type",
+          "readOnly": true
+        },
+        "subject": {
+          "type": "string",
+          "description": "Note subject"
+        }
+      },
+      "fieldCount": 7,
+      "fetchXml": null
+    }
+  ]
+}
