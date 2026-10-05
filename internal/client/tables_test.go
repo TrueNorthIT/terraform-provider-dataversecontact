@@ -197,3 +197,27 @@ func TestDeleteTableBinnedThenMissingErrors(t *testing.T) {
 		t.Fatal("expected an error when a binned table vanishes before the purge")
 	}
 }
+
+// The API returns validation findings and per-route errors as objects, not
+// strings. Typing them as []string failed every save whose schema drew a
+// warning ("cannot unmarshal object into ... warnings of type string").
+func TestResponsesDecodeObjectErrors(t *testing.T) {
+	var save SaveDraftResponse
+	err := json.Unmarshal([]byte(`{"message":"Draft saved","validation":{"valid":true,"errors":[],
+		"warnings":[{"severity":"warning","field":"fields.x","code":"TYPE_MISMATCH","message":"m"}]}}`), &save)
+	if err != nil {
+		t.Fatalf("SaveDraftResponse: %v", err)
+	}
+	if got := save.Validation.Warnings[0].Code; got != "TYPE_MISMATCH" {
+		t.Errorf("warning code = %q", got)
+	}
+
+	var pub PublishResponse
+	err = json.Unmarshal([]byte(`{"published":[],"errors":[{"routeName":"case","error":"Draft blob not found"}]}`), &pub)
+	if err != nil {
+		t.Fatalf("PublishResponse: %v", err)
+	}
+	if pub.Errors[0].RouteName != "case" {
+		t.Errorf("error route = %q", pub.Errors[0].RouteName)
+	}
+}

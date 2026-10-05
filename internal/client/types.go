@@ -60,16 +60,30 @@ type SaveDraftResponse struct {
 
 // ValidationInfo represents validation results.
 type ValidationInfo struct {
-	Valid    bool     `json:"valid"`
-	Errors   []string `json:"errors"`
-	Warnings []string `json:"warnings"`
+	Valid    bool              `json:"valid"`
+	Errors   []ValidationIssue `json:"errors"`
+	Warnings []ValidationIssue `json:"warnings"`
+}
+
+// ValidationIssue is one validation finding against a schema.
+type ValidationIssue struct {
+	Severity string `json:"severity"`
+	Field    string `json:"field"`
+	Code     string `json:"code"`
+	Message  string `json:"message"`
+}
+
+// RouteError is a per-route failure in a publish, unpublish or remove response.
+type RouteError struct {
+	RouteName string `json:"routeName"`
+	Error     string `json:"error"`
 }
 
 // PublishResponse is the response from POST /table-manager/publish.
 type PublishResponse struct {
 	Message    string                     `json:"message"`
 	Published  []string                   `json:"published"`
-	Errors     []string                   `json:"errors"`
+	Errors     []RouteError               `json:"errors"`
 	Validation map[string]*ValidationInfo `json:"validation,omitempty"`
 }
 
@@ -85,9 +99,9 @@ type UnpublishRequest struct {
 
 // UnpublishResponse is the response from POST /table-manager/unpublish.
 type UnpublishResponse struct {
-	Message     string   `json:"message"`
-	Unpublished []string `json:"unpublished"`
-	Errors      []string `json:"errors"`
+	Message     string       `json:"message"`
+	Unpublished []string     `json:"unpublished"`
+	Errors      []RouteError `json:"errors"`
 }
 
 // RemoveRequest is the request body for POST /table-manager/remove.
@@ -97,9 +111,9 @@ type RemoveRequest struct {
 
 // RemoveResponse is the response from POST /table-manager/remove.
 type RemoveResponse struct {
-	Message string   `json:"message"`
-	Removed []string `json:"removed"`
-	Errors  []string `json:"errors"`
+	Message string       `json:"message"`
+	Removed []string     `json:"removed"`
+	Errors  []RouteError `json:"errors"`
 }
 
 // DeleteRecycledResponse is the response from DELETE /table-manager/recycled/{table}.
@@ -153,9 +167,9 @@ type CustomApiPublishRequest struct {
 
 // CustomApiPublishResponse is the response from POST /custom-api-manager/publish.
 type CustomApiPublishResponse struct {
-	Message   string   `json:"message"`
-	Published []string `json:"published"`
-	Errors    []string `json:"errors"`
+	Message   string       `json:"message"`
+	Published []string     `json:"published"`
+	Errors    []RouteError `json:"errors"`
 }
 
 // CustomApiRemoveRequest is the request body for POST /custom-api-manager/remove.
@@ -165,9 +179,9 @@ type CustomApiRemoveRequest struct {
 
 // CustomApiRemoveResponse is the response from POST /custom-api-manager/remove.
 type CustomApiRemoveResponse struct {
-	Message string   `json:"message"`
-	Removed []string `json:"removed"`
-	Errors  []string `json:"errors"`
+	Message string       `json:"message"`
+	Removed []string     `json:"removed"`
+	Errors  []RouteError `json:"errors"`
 }
 
 // --- Permissions Types ---
