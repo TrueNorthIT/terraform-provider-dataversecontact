@@ -270,17 +270,17 @@ func schemaJSONToModel(ctx context.Context, raw json.RawMessage, model *TableRes
 	}
 
 	// Fields map
-	model.Fields = fieldsJSONToModel(ctx, hint.Fields, diags)
+	model.Fields = fieldsJSONToModel(ctx, hint.Fields, model.Fields, diags)
 
 	// Computed
 	model.FieldCount = types.Int64Value(int64(len(hint.Fields)))
 
 	// Join steps
-	model.ContactJoinStep = joinStepsJSONToModel(hint.ContactJoinPath)
-	model.TeamJoinStep = joinStepsJSONToModel(hint.TeamJoinPath)
+	model.ContactJoinStep = joinStepsJSONToModel(hint.ContactJoinPath, model.ContactJoinStep)
+	model.TeamJoinStep = joinStepsJSONToModel(hint.TeamJoinPath, model.TeamJoinStep)
 
 	// Alternate contact join paths
-	model.AlternateContactJoinPath = alternateJoinPathsJSONToModel(hint.AlternateContactJoinPaths)
+	model.AlternateContactJoinPath = alternateJoinPathsJSONToModel(hint.AlternateContactJoinPaths, model.AlternateContactJoinPath)
 
 	// Create defaults
 	model.CreateDefault = createDefaultsJSONToModel(hint.CreateDefaults)
@@ -399,18 +399,25 @@ func fieldsModelToJSON(ctx context.Context, fields types.Map, diags *diag.Diagno
 	return result
 }
 
-func fieldsJSONToModel(ctx context.Context, fields map[string]FieldHintJSON, diags *diag.Diagnostics) types.Map {
+// fieldsJSONToModel builds the fields map from the API's. prior is the
+// plan or state being refreshed; see keepFalse.
+func fieldsJSONToModel(ctx context.Context, fields map[string]FieldHintJSON, prior types.Map, diags *diag.Diagnostics) types.Map {
 	if len(fields) == 0 {
 		return types.MapNull(fieldObjectType())
 	}
 
 	elements := make(map[string]attr.Value, len(fields))
+	priorFields := prior.Elements()
 
 	for key, f := range fields {
+		var priorReadOnly attr.Value
+		if obj, ok := priorFields[key].(types.Object); ok {
+			priorReadOnly = obj.Attributes()["read_only"]
+		}
 		attrs := map[string]attr.Value{
 			"type":         types.StringValue(f.Type),
 			"description":  types.StringValue(f.Description),
-			"read_only":    boolOrNull(f.ReadOnly),
+			"read_only":    keepFalse(f.ReadOnly, priorReadOnly),
 			"lookup_table": stringOrNullAttr(f.LookupTable),
 			"value_field":  stringOrNullAttr(f.ValueField),
 			"bind_field":   stringOrNullAttr(f.BindField),
@@ -443,17 +450,21 @@ func joinStepsModelToJSON(ctx context.Context, steps []JoinStepModel, diags *dia
 	return result
 }
 
-func joinStepsJSONToModel(steps []JoinStepJSON) []JoinStepModel {
+func joinStepsJSONToModel(steps []JoinStepJSON, prior []JoinStepModel) []JoinStepModel {
 	if len(steps) == 0 {
 		return nil
 	}
 	result := make([]JoinStepModel, len(steps))
 	for i, s := range steps {
+		var priorReverse attr.Value
+		if i < len(prior) {
+			priorReverse = prior[i].Reverse
+		}
 		result[i] = JoinStepModel{
 			Table:   types.StringValue(s.Table),
 			From:    types.StringValue(s.From),
 			Key:     types.StringValue(s.Key),
-			Reverse: boolOrNull(s.Reverse),
+			Reverse: keepFalse(s.Reverse, priorReverse),
 		}
 	}
 	return result
@@ -481,22 +492,20 @@ func alternateJoinPathsModelToJSON(ctx context.Context, paths []AlternateContact
 	return result
 }
 
-func alternateJoinPathsJSONToModel(paths [][]JoinStepJSON) []AlternateContactJoinPathModel {
+func alternateJoinPathsJSONToModel(paths [][]JoinStepJSON, prior []AlternateContactJoinPathModel) []AlternateContactJoinPathModel {
 	if len(paths) == 0 {
 		return nil
 	}
 	result := make([]AlternateContactJoinPathModel, len(paths))
 	for i, p := range paths {
-		steps := make([]JoinStepModel, len(p))
-		for j, s := range p {
-			steps[j] = JoinStepModel{
-				Table:   types.StringValue(s.Table),
-				From:    types.StringValue(s.From),
-				Key:     types.StringValue(s.Key),
-				Reverse: boolOrNull(s.Reverse),
-			}
+		var priorSteps []JoinStepModel
+		if i < len(prior) {
+			priorSteps = prior[i].Step
 		}
-		result[i] = AlternateContactJoinPathModel{Step: steps}
+		result[i] = AlternateContactJoinPathModel{Step: joinStepsJSONToModel(p, priorSteps)}
+		if result[i].Step == nil {
+			result[i].Step = []JoinStepModel{}
+		}
 	}
 	return result
 }
@@ -647,11 +656,19 @@ func stringOrNullAttr(s string) basetypes.StringValue {
 	return types.StringValue(s)
 }
 
-func boolOrNull(b bool) basetypes.BoolValue {
-	if !b {
-		return types.BoolNull()
+// keepFalse reads an omitempty boolean back. The API leaves `false` out, so
+// it arrives as false whether the config said false or nothing. Reading it as
+// null breaks a config that wrote `= false` ("inconsistent result after
+// apply"); reading it as false breaks one that left it out. So an explicit
+// false already in the plan or state is kept, and anything else is null.
+func keepFalse(b bool, prior attr.Value) basetypes.BoolValue {
+	if b {
+		return types.BoolValue(true)
 	}
-	return types.BoolValue(true)
+	if p, ok := prior.(types.Bool); ok && !p.IsNull() && !p.IsUnknown() && !p.ValueBool() {
+		return types.BoolValue(false)
+	}
+	return types.BoolNull()
 }
 
 // singularize converts a Dataverse entity set name (plural) to the entity

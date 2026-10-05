@@ -256,7 +256,11 @@ resource "dataversecontact_permissions_sync" "this" {
 
 # ── Read back what's published ──────────────────────────────────────────────
 
-data "dataversecontact_scopes" "all" {}
+# depends_on: read after this scope is published, or the first apply lists
+# the scopes from before it existed.
+data "dataversecontact_scopes" "all" {
+  depends_on = [dataversecontact_permissions_sync.this]
+}
 
 output "scopes" {
   value = data.dataversecontact_scopes.all.scopes

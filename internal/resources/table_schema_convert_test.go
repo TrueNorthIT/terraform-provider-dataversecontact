@@ -45,7 +45,7 @@ func TestJoinStepReverseRoundTrip(t *testing.T) {
 		t.Errorf("step 1: reverse should marshal to false")
 	}
 
-	out := joinStepsJSONToModel(j)
+	out := joinStepsJSONToModel(j, nil)
 	if !out[0].Reverse.ValueBool() {
 		t.Errorf("step 0: round-trip lost reverse=true")
 	}
@@ -73,7 +73,7 @@ func TestPolymorphicLookupRoundTrip(t *testing.T) {
 		RequiredPermission:   types.StringValue("case"),
 		DefaultSelect:        stringsToTFList([]string{"incidentid"}),
 		LookupFields:         stringsToTFList([]string{"title"}),
-		Fields:               fieldsJSONToModel(context.Background(), map[string]FieldHintJSON{}, &diags),
+		Fields:               fieldsJSONToModel(context.Background(), map[string]FieldHintJSON{}, types.MapNull(fieldObjectType()), &diags),
 		PolymorphicLookup: &PolymorphicLookupModel{
 			Field:              types.StringValue("sb_service_recordid"),
 			RequiredPermission: types.StringValue("servicerecord"),
@@ -157,7 +157,7 @@ func TestPolymorphicLookupExplicitFalseIsSent(t *testing.T) {
 		RequiredPermission:   types.StringValue("case"),
 		DefaultSelect:        stringsToTFList([]string{"incidentid"}),
 		LookupFields:         stringsToTFList([]string{"title"}),
-		Fields:               fieldsJSONToModel(context.Background(), map[string]FieldHintJSON{}, &diags),
+		Fields:               fieldsJSONToModel(context.Background(), map[string]FieldHintJSON{}, types.MapNull(fieldObjectType()), &diags),
 		PolymorphicLookup: &PolymorphicLookupModel{
 			Field:              types.StringValue("sb_service_recordid"),
 			RequiredPermission: types.StringValue("servicerecord"),
@@ -188,7 +188,7 @@ func TestNoPolymorphicLookupOmitsRule(t *testing.T) {
 		RequiredPermission:   types.StringValue("contact"),
 		DefaultSelect:        stringsToTFList([]string{"contactid"}),
 		LookupFields:         stringsToTFList([]string{"fullname"}),
-		Fields:               fieldsJSONToModel(context.Background(), map[string]FieldHintJSON{}, &diags),
+		Fields:               fieldsJSONToModel(context.Background(), map[string]FieldHintJSON{}, types.MapNull(fieldObjectType()), &diags),
 		// As Terraform hands it over for a config with no block written.
 		PolymorphicLookup: &PolymorphicLookupModel{Field: types.StringNull()},
 	}
@@ -294,7 +294,7 @@ func TestBusinessProcessRoundTrip(t *testing.T) {
 		RequiredPermission:   types.StringValue("case"),
 		DefaultSelect:        stringsToTFList([]string{"incidentid"}),
 		LookupFields:         stringsToTFList([]string{"title"}),
-		Fields:               fieldsJSONToModel(context.Background(), map[string]FieldHintJSON{}, &diags),
+		Fields:               fieldsJSONToModel(context.Background(), map[string]FieldHintJSON{}, types.MapNull(fieldObjectType()), &diags),
 		PolymorphicLookup: &PolymorphicLookupModel{
 			Field:              types.StringValue("sb_service_recordid"),
 			RequiredPermission: types.StringValue("servicerecord"),
@@ -338,7 +338,7 @@ func TestBusinessProcessEmptyObjectRoundTrip(t *testing.T) {
 		RequiredPermission:   types.StringValue("request"),
 		DefaultSelect:        stringsToTFList([]string{"sb_requestid"}),
 		LookupFields:         stringsToTFList([]string{"sb_name"}),
-		Fields:               fieldsJSONToModel(context.Background(), map[string]FieldHintJSON{}, &diags),
+		Fields:               fieldsJSONToModel(context.Background(), map[string]FieldHintJSON{}, types.MapNull(fieldObjectType()), &diags),
 		BusinessProcess:      &BusinessProcessModel{ExposeAs: types.StringNull()},
 		PolymorphicLookup:    &PolymorphicLookupModel{Field: types.StringNull()},
 	}

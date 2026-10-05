@@ -170,6 +170,30 @@ func (s *Server) ClearFail() {
 	s.Fail = nil
 }
 
+// SeedTable publishes a schema directly, as if it was built outside
+// Terraform (in Table Manager, or by an older config) and is about to be
+// imported.
+func (s *Server) SeedTable(scope string, schema map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	put(s.tables, scope, schema["routeName"].(string), clone(schema))
+}
+
+// EditTable changes a published schema in place, as if someone edited it
+// outside Terraform.
+func (s *Server) EditTable(scope, route string, edit func(schema map[string]any)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	edit(s.tables[scope][route])
+}
+
+// Table returns a copy of a published table's stored schema, or nil.
+func (s *Server) Table(scope, route string) map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return clone(s.tables[scope][route])
+}
+
 // DeleteCustomApi is DeleteTable for custom APIs.
 func (s *Server) DeleteCustomApi(scope, route string) {
 	s.mu.Lock()

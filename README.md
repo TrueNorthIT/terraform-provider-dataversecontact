@@ -123,6 +123,10 @@ descriptions live in the Go schemas under `internal/resources/` and
 - **Contract tests** check the client types, and the fake, against real API responses in
   [`internal/testdata/contract`](internal/testdata/contract/README.md). When the API changes a
   response, update the fixture first.
+- **Whole configs:** every config under `examples/` is applied, planned again and destroyed.
+  To run real portal configs the same way (they stay out of this public repo), list their
+  directories in `DATAVERSE_TF_CONFIG_DIRS` (`;`-separated on Windows, `:` elsewhere) and run
+  `go test ./internal/provider -run TestAccRealConfigs`.
 - CI fails if coverage of provider code (excluding the fake) drops below **90%**. Failure
   paths are tested by making the fake fail a request: `s.SetFail("PUT table-manager/case", 500)`.
 
