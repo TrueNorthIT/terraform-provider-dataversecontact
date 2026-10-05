@@ -102,8 +102,8 @@ curl -o .vscode/dataversecontact.code-snippets \
 ```sh
 make build              # build the provider binary
 make dev-override       # print the dev_overrides CLI config for local testing
-make test               # unit tests
-make testacc            # acceptance tests (needs DATAVERSE_CONTACT_* env vars)
+make test               # unit, contract and fake-API acceptance tests (needs terraform on PATH)
+make testacc            # the same, plus any tests against a live API (needs DATAVERSE_CONTACT_* env vars)
 make docs               # regenerate docs/ from schema + templates/ + examples/
 make docs-check         # fail if committed docs are stale
 make validate-examples  # terraform-validate every example against the schema
@@ -113,6 +113,16 @@ Docs are generated with [tfplugindocs](https://github.com/hashicorp/terraform-pl
 (wired as a `go.mod` tool; needs a `terraform` binary on PATH). Attribute
 descriptions live in the Go schemas under `internal/resources/` and
 `internal/datasources/` — edit those, then `make docs`.
+
+### Tests
+
+- **Acceptance tests** (`internal/provider/*_acc_test.go`) run each resource through real
+  Terraform plan, apply and import against `internal/fakeapi`, an in-memory copy of the admin
+  API. After every apply Terraform plans again and fails on any diff, which catches
+  inconsistent-result and perpetual-diff bugs. A new bug of that kind gets a test here first.
+- **Contract tests** check the client types, and the fake, against real API responses in
+  [`internal/testdata/contract`](internal/testdata/contract/README.md). When the API changes a
+  response, update the fixture first.
 
 Architecture notes live in [OVERVIEW.md](OVERVIEW.md).
 

@@ -49,6 +49,11 @@ jobs:
         with:
           go-version-file: "go.mod"
           cache: true
+      # The acceptance tests in internal/provider drive a real terraform
+      # binary against internal/fakeapi, with no secrets.
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
       - run: go mod download
       - run: go test ./... -v -timeout 30m
 
@@ -84,7 +89,8 @@ jobs:
           terraform_wrapper: false
       - run: ./scripts/validate-examples.sh
 
-  # Acceptance tests run against a real API instance
+  # Reserved for tests against a real API instance (resource.Test, gated on
+  # TF_ACC). There are none yet, so this re-runs the fake-backed suite.
   # Only runs on main branch pushes (not PRs) to avoid exposing secrets
   acceptance:
     name: Acceptance Tests
@@ -104,5 +110,8 @@ jobs:
         with:
           go-version-file: "go.mod"
           cache: true
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
       - run: go mod download
       - run: go test ./... -v -timeout 120m

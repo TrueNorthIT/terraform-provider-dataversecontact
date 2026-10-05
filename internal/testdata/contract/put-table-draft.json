@@ -1,0 +1,30 @@
+{
+  "message": "Draft saved",
+  "draft": {
+    "routeName": "case",
+    "entity": "incident",
+    "scope": "default",
+    "updatedAt": "2026-10-05T12:00:00.000Z",
+    "updatedBy": "terraform@connection-key",
+    "changeType": "modified"
+  },
+  "validation": {
+    "valid": false,
+    "errors": [
+      {
+        "severity": "error",
+        "field": "fields.new_gone",
+        "code": "FIELD_NOT_FOUND",
+        "message": "Field \"new_gone\" does not exist on incident"
+      }
+    ],
+    "warnings": [
+      {
+        "severity": "warning",
+        "field": "fields.prioritycode",
+        "code": "TYPE_MISMATCH",
+        "message": "Field \"prioritycode\" is declared as string but Dataverse type is Picklist"
+      }
+    ]
+  }
+}

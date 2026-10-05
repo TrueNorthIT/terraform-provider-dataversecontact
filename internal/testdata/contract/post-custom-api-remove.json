@@ -1,0 +1,12 @@
+{
+  "message": "Removed 1 custom API(s) to recycle bin",
+  "removed": [
+    "expand-calendar"
+  ],
+  "errors": [
+    {
+      "routeName": "other",
+      "error": "No published or draft custom API found"
+    }
+  ]
+}

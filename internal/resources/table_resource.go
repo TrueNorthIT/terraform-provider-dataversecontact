@@ -756,8 +756,13 @@ func (r *TableResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	scope := state.Scope.ValueString()
 	routeName := state.RouteName.ValueString()
 
-	r.readIntoModel(ctx, scope, routeName, &state, &resp.Diagnostics)
+	found := r.readIntoModel(ctx, scope, routeName, &state, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+	if !found {
+		// Deleted outside Terraform: drop it so the next plan re-creates it.
+		resp.State.RemoveResource(ctx)
 		return
 	}
 
@@ -833,16 +838,16 @@ func (r *TableResource) ImportState(ctx context.Context, req resource.ImportStat
 }
 
 // readIntoModel reads the current table state from the API and populates the model.
-func (r *TableResource) readIntoModel(ctx context.Context, scope, routeName string, model *TableResourceModel, diagnostics *diag.Diagnostics) {
+func (r *TableResource) readIntoModel(ctx context.Context, scope, routeName string, model *TableResourceModel, diagnostics *diag.Diagnostics) (found bool) {
 	tableResp, err := r.client.GetTable(ctx, scope, routeName)
 	if err != nil {
 		if client.IsNotFound(err) {
 			diagnostics.AddWarning("Table not found",
 				fmt.Sprintf("Table %s/%s not found, removing from state", scope, routeName))
-			return
+			return false
 		}
 		diagnostics.AddError("Failed to read table", err.Error())
-		return
+		return false
 	}
 
 	model.ID = types.StringValue(fmt.Sprintf("%s/%s", scope, routeName))
@@ -851,4 +856,5 @@ func (r *TableResource) readIntoModel(ctx context.Context, scope, routeName stri
 
 	// Parse the JSON schema into the HCL model
 	schemaJSONToModel(ctx, tableResp.Schema, model, diagnostics)
+	return true
 }

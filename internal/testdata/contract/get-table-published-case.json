@@ -1,0 +1,121 @@
+{
+  "source": "built-in",
+  "draft": null,
+  "schema": {
+    "routeName": "case",
+    "description": "Support cases \u2014 tickets you raised (me) and your company's (team)",
+    "dataverseTable": "incidents",
+    "dataverseLogicalName": "incident",
+    "requiredPermission": "case",
+    "primaryKey": "incidentid",
+    "aliases": [
+      "cases",
+      "incidents",
+      "tickets"
+    ],
+    "defaultSelect": [
+      "incidentid",
+      "title",
+      "ticketnumber",
+      "prioritycode",
+      "statecode",
+      "statuscode",
+      "description",
+      "createdon",
+      "modifiedon"
+    ],
+    "contactJoinPath": [
+      {
+        "table": "contacts",
+        "from": "primarycontactid",
+        "key": "contactid"
+      }
+    ],
+    "teamJoinPath": [
+      {
+        "table": "accounts",
+        "from": "customerid_account",
+        "key": "accountid"
+      }
+    ],
+    "createDefaults": [
+      {
+        "field": "primarycontactid",
+        "bindTo": "contact",
+        "entitySet": "contacts"
+      },
+      {
+        "field": "customerid_account",
+        "bindTo": "account",
+        "entitySet": "accounts"
+      }
+    ],
+    "lookupFields": [
+      "title",
+      "ticketnumber"
+    ],
+    "lookupSearchContains": [
+      "title",
+      "ticketnumber"
+    ],
+    "filters": [
+      "statecode eq 0"
+    ],
+    "publicChoices": true,
+    "fields": {
+      "createdon": {
+        "type": "datetime",
+        "description": "Date created",
+        "readOnly": true
+      },
+      "customerid": {
+        "type": "lookup",
+        "description": "Customer (account)",
+        "readOnly": true
+      },
+      "description": {
+        "type": "string",
+        "description": "Details"
+      },
+      "incidentid": {
+        "type": "string",
+        "description": "Unique case identifier",
+        "readOnly": true
+      },
+      "modifiedon": {
+        "type": "datetime",
+        "description": "Date last modified",
+        "readOnly": true
+      },
+      "primarycontactid": {
+        "type": "lookup",
+        "description": "Primary contact",
+        "readOnly": true,
+        "lookupTable": "contact"
+      },
+      "prioritycode": {
+        "type": "choice",
+        "description": "Priority"
+      },
+      "statecode": {
+        "type": "choice",
+        "description": "Status (Active/Resolved/Cancelled)",
+        "readOnly": true
+      },
+      "statuscode": {
+        "type": "choice",
+        "description": "Status reason",
+        "readOnly": true
+      },
+      "ticketnumber": {
+        "type": "string",
+        "description": "Case number",
+        "readOnly": true
+      },
+      "title": {
+        "type": "string",
+        "description": "Summary"
+      }
+    }
+  }
+}

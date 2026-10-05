@@ -1,0 +1,5 @@
+{
+  "error": "Not Found",
+  "message": "Unknown table: no_such_table_xyz",
+  "statusCode": 404
+}

@@ -1,0 +1,27 @@
+{
+  "definitions": [
+    {
+      "routeName": "expand-calendar",
+      "source": "published",
+      "dataverseUniqueName": "ExpandCalendar",
+      "description": null,
+      "requiredPermission": "expand-calendar:invoke",
+      "isFunction": true,
+      "apiType": "function",
+      "bindingType": "entity",
+      "boundEntityLogicalName": "calendar",
+      "boundEntitySetName": "calendars",
+      "publicInvoke": true,
+      "requestParameters": [
+        {
+          "uniqueName": "Start",
+          "type": "datetime"
+        },
+        {
+          "uniqueName": "End",
+          "type": "datetime"
+        }
+      ]
+    }
+  ]
+}
