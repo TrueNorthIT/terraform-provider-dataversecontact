@@ -37,12 +37,34 @@ The caller always names the record in the URL. A bound API runs on it; an
 unbound one has its id written into the parameter `target.recordIdPath` names.
 Either way the record Dataverse acts on is the record the API checked.
 
+## The binding comes from Dataverse
+
+Whether the API is a function or an action, whether it's bound, and to which
+table, are read from Dataverse's `customapis` table when the definition is
+saved. Leave `isFunction`, `bindingType`, `boundEntityLogicalName` and
+`boundEntitySetName` out; a definition that states one of them differently from
+Dataverse fails the apply with a 400 naming the field. A bound API is called on
+its `target` table's entity set, which must be the table Dataverse binds it to;
+with no target the set is read from the table's metadata.
+
+Built-in messages (`CloseIncident`, `ExpandCalendar`) and classic process
+actions aren't in `customapis`, so their definitions still declare `isFunction`
+and `bindingType` — plus `boundEntitySetName`, or a `target`, when bound. Even
+then a wrong entity set can't run the API on another table: Dataverse answers a
+bound call on the wrong set with a 404.
+
+The provider doesn't refresh `schema_json` from the server, so the fields the
+API fills in cause no drift. The computed `is_function` and `binding_type`
+attributes show what Dataverse says.
+
 ## Shapes
 
 ### Bound to a record
 
-`target` must be the bound table. `target.table` names a published table route
-in the same scope, and its contact and account scoping is reused.
+`target.table` names a published table route in the same scope, and its
+contact and account scoping is reused. It must be a route on the table
+Dataverse binds the API to — `tn_EscalateCase` below is bound to `incident`, and
+the `case` route is on `incidents`.
 
 ```terraform
 resource "dataversecontact_custom_api" "escalate_case" {
@@ -50,14 +72,10 @@ resource "dataversecontact_custom_api" "escalate_case" {
   route_name = "escalate-case"
 
   schema_json = jsonencode({
-    routeName              = "escalate-case"
-    dataverseUniqueName    = "tn_EscalateCase"
-    isFunction             = false
-    bindingType            = "entity"
-    boundEntityLogicalName = "incident"
-    boundEntitySetName     = "incidents"
-    tiers                  = ["me", "team", "all"]
-    target                 = { table = "case" }
+    routeName           = "escalate-case"
+    dataverseUniqueName = "tn_EscalateCase"
+    tiers               = ["me", "team", "all"]
+    target              = { table = "case" }
   })
 }
 ```
@@ -78,8 +96,9 @@ resource "dataversecontact_custom_api" "close_incident" {
   schema_json = jsonencode({
     routeName           = "close-incident"
     dataverseUniqueName = "CloseIncident"
-    isFunction          = false
-    bindingType         = "global"
+    # A built-in message, not in customapis — so its binding is declared.
+    isFunction  = false
+    bindingType = "global"
     tiers               = ["me", "team"]
     target = {
       table        = "case"
@@ -111,8 +130,6 @@ resource "dataversecontact_custom_api" "my_upcoming_bookings" {
   schema_json = jsonencode({
     routeName           = "my-upcoming-bookings"
     dataverseUniqueName = "tn_MyUpcomingBookings"
-    isFunction          = true
-    bindingType         = "global"
     tiers               = ["me"]
     callerParameters    = { CitizenId = "contactId" }
     requestParameters = [
@@ -132,10 +149,11 @@ resource "dataversecontact_custom_api" "expand_calendar" {
   schema_json = jsonencode({
     routeName           = "expand-calendar"
     dataverseUniqueName = "ExpandCalendar"
-    isFunction          = true
-    bindingType         = "entity"
-    boundEntitySetName  = "calendars"
-    tiers               = ["public"]
+    # A built-in message, not in customapis — so its binding is declared.
+    isFunction         = true
+    bindingType        = "entity"
+    boundEntitySetName = "calendars"
+    tiers              = ["public"]
     requestParameters = [
       { uniqueName = "Start", type = "datetime" },
       { uniqueName = "End", type = "datetime" },
@@ -165,8 +183,12 @@ target = {
 A definition that breaks one of these fails `terraform apply` with a 400 that
 names the problem.
 
-- An entity-bound API needs `boundEntitySetName`, its `target` must be that
-  table, and it takes no `recordIdPath`.
+- A definition that states `isFunction`, `bindingType` or the bound table
+  differently from Dataverse is refused. One that isn't in `customapis` (a
+  built-in message or classic action) must state `isFunction` and
+  `bindingType`, and a bound one `boundEntitySetName` or a `target`.
+- A bound API's `target` must be the table Dataverse binds it to, and it takes
+  no `recordIdPath`.
 - An unbound API with a `target` needs `recordIdPath`, rooted at a declared
   request parameter. On a function it must be a top-level `guid`,
   `entityReference` or `string` parameter.
@@ -185,6 +207,7 @@ names the problem.
   `callerParameters` need `tiers`.
 
 `requiredPermission` is optional; it defaults to `{routeName}:invoke`.
+`tiers = null` is the same as leaving `tiers` out.
 
 ## Definitions without `tiers`
 

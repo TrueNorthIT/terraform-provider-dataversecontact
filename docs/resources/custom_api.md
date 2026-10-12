@@ -15,6 +15,11 @@ Manages a custom API configuration in the Dataverse Contact API. The schema is s
 ```terraform
 # Registers a Dataverse Custom API as an invokable route. The schema is the
 # CustomApiHint JSON — inline via jsonencode, or file("....customapi.json").
+#
+# For an API in Dataverse's customapis table, leave isFunction, bindingType and
+# the bound table out: they're read from Dataverse when the definition is
+# saved. Both examples here are built-in messages, which aren't in customapis,
+# so they declare their binding.
 resource "dataversecontact_custom_api" "expand_calendar" {
   scope      = "default"
   route_name = "expand-calendar"
@@ -47,7 +52,7 @@ resource "dataversecontact_custom_api" "close_incident" {
   schema_json = jsonencode({
     routeName           = "close-incident"
     dataverseUniqueName = "CloseIncident"
-    isFunction          = false
+    isFunction          = false # built-in message: binding declared
     bindingType         = "global"
     tiers               = ["me", "team"]
     target = {
@@ -69,15 +74,15 @@ resource "dataversecontact_custom_api" "close_incident" {
 ### Required
 
 - `route_name` (String) The URL-friendly route name for this custom API.
-- `schema_json` (String) The custom API schema as a JSON string (CustomApiHint format: routeName, dataverseUniqueName, displayName, description, requiredPermission (optional, defaults to {routeName}:invoke), isFunction, bindingType, boundEntitySetName, tiers, target, callerParameters, requestParameters, responseProperties; the legacy publicInvoke and ownershipCheck are still accepted — see the Custom APIs guide for the shapes and the rules the API enforces on apply). Usually jsonencode(...) or file("....customapi.json").
+- `schema_json` (String) The custom API schema as a JSON string (CustomApiHint format: routeName, dataverseUniqueName, displayName, description, requiredPermission (optional, defaults to {routeName}:invoke), tiers, target, callerParameters, requestParameters, responseProperties; isFunction, bindingType and the bound table are read from Dataverse on save and only need declaring for built-in messages and classic actions; the legacy publicInvoke and ownershipCheck are still accepted — see the Custom APIs guide for the shapes and the rules the API enforces on apply). Usually jsonencode(...) or file("....customapi.json").
 - `scope` (String) The scope this custom API belongs to.
 
 ### Read-Only
 
-- `binding_type` (String) The binding type ("global", "entity", "entityCollection").
+- `binding_type` (String) The binding type ("global", "entity", "entityCollection"), as Dataverse reports it.
 - `dataverse_unique_name` (String) The Dataverse unique name for this custom API.
 - `id` (String) Resource identifier in the format {scope}/{route_name}.
-- `is_function` (Boolean) Whether this is a function (GET) or action (POST).
+- `is_function` (Boolean) Whether this is a function (GET) or action (POST), as Dataverse reports it.
 - `source` (String) The source of the published schema ("published", "built-in").
 
 ## Import

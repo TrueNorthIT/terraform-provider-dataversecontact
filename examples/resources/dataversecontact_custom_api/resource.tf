@@ -1,5 +1,10 @@
 # Registers a Dataverse Custom API as an invokable route. The schema is the
 # CustomApiHint JSON — inline via jsonencode, or file("....customapi.json").
+#
+# For an API in Dataverse's customapis table, leave isFunction, bindingType and
+# the bound table out: they're read from Dataverse when the definition is
+# saved. Both examples here are built-in messages, which aren't in customapis,
+# so they declare their binding.
 resource "dataversecontact_custom_api" "expand_calendar" {
   scope      = "default"
   route_name = "expand-calendar"
@@ -32,7 +37,7 @@ resource "dataversecontact_custom_api" "close_incident" {
   schema_json = jsonencode({
     routeName           = "close-incident"
     dataverseUniqueName = "CloseIncident"
-    isFunction          = false
+    isFunction          = false # built-in message: binding declared
     bindingType         = "global"
     tiers               = ["me", "team"]
     target = {

@@ -207,9 +207,11 @@ resource "dataversecontact_custom_api" "expand_calendar" {
   route_name = "expand-calendar"
 
   schema_json = jsonencode({
-    routeName              = "expand-calendar"
-    dataverseUniqueName    = "ExpandCalendar"
-    requiredPermission     = "expand-calendar:invoke"
+    routeName           = "expand-calendar"
+    dataverseUniqueName = "ExpandCalendar"
+    requiredPermission  = "expand-calendar:invoke"
+    # ExpandCalendar is a built-in message, not in customapis, so its binding
+    # is declared. A custom API from customapis leaves these four out.
     isFunction             = true
     publicInvoke           = true
     bindingType            = "entity"
@@ -225,9 +227,10 @@ resource "dataversecontact_custom_api" "expand_calendar" {
 # A citizen's own booking: answers only on
 # /me/actions/reschedule-booking/{servicebookingId}. The id in the URL is
 # checked against the servicebooking route's contact join, then written into
-# ServiceBookingId; CitizenId is filled from the signed-in caller. Replace
-# tn_RescheduleBooking with a custom API that exists in your Dataverse. Needs
-# the API release with tiered custom APIs.
+# ServiceBookingId; CitizenId is filled from the signed-in caller. Whether it's
+# a function or an action, and that it's unbound, are read from Dataverse.
+# Replace tn_RescheduleBooking with a custom API that exists in your Dataverse.
+# Needs the API release with tiered custom APIs.
 
 resource "dataversecontact_custom_api" "reschedule_booking" {
   scope      = var.scope
@@ -236,8 +239,6 @@ resource "dataversecontact_custom_api" "reschedule_booking" {
   schema_json = jsonencode({
     routeName           = "reschedule-booking"
     dataverseUniqueName = "tn_RescheduleBooking"
-    isFunction          = false
-    bindingType         = "global"
     tiers               = ["me"]
     target = {
       table        = "servicebooking"

@@ -80,8 +80,9 @@ func (r *CustomApiResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			"schema_json": schema.StringAttribute{
 				Description: "The custom API schema as a JSON string (CustomApiHint format: routeName, " +
 					"dataverseUniqueName, displayName, description, requiredPermission (optional, defaults to " +
-					"{routeName}:invoke), isFunction, bindingType, boundEntitySetName, tiers, target, " +
-					"callerParameters, requestParameters, responseProperties; the legacy publicInvoke and " +
+					"{routeName}:invoke), tiers, target, callerParameters, requestParameters, " +
+					"responseProperties; isFunction, bindingType and the bound table are read from Dataverse " +
+					"on save and only need declaring for built-in messages and classic actions; the legacy publicInvoke and " +
 					"ownershipCheck are still accepted — see the Custom APIs guide for the shapes and the " +
 					"rules the API enforces on apply). Usually jsonencode(...) or file(\"....customapi.json\").",
 				Required: true,
@@ -98,11 +99,11 @@ func (r *CustomApiResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Computed:    true,
 			},
 			"is_function": schema.BoolAttribute{
-				Description: "Whether this is a function (GET) or action (POST).",
+				Description: "Whether this is a function (GET) or action (POST), as Dataverse reports it.",
 				Computed:    true,
 			},
 			"binding_type": schema.StringAttribute{
-				Description: "The binding type (\"global\", \"entity\", \"entityCollection\").",
+				Description: "The binding type (\"global\", \"entity\", \"entityCollection\"), as Dataverse reports it.",
 				Computed:    true,
 			},
 		},
@@ -257,7 +258,13 @@ func (r *CustomApiResource) readIntoModel(ctx context.Context, scope, routeName 
 	model.ID = types.StringValue(fmt.Sprintf("%s/%s", scope, routeName))
 	model.Source = types.StringValue(apiResp.Source)
 
-	// Parse schema to extract computed fields
+	// Parse schema to extract computed fields. The API fills isFunction and
+	// bindingType from Dataverse on save, but an API that predates that may
+	// store a schema without them — a computed attribute must still be known
+	// after apply, so default to null.
+	model.DataverseUniqueName = types.StringNull()
+	model.IsFunction = types.BoolNull()
+	model.BindingType = types.StringNull()
 	var schemaMap map[string]json.RawMessage
 	if err := json.Unmarshal(apiResp.Schema, &schemaMap); err == nil {
 		if v, ok := schemaMap["dataverseUniqueName"]; ok {
