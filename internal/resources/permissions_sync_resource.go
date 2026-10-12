@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -35,6 +36,7 @@ type PermissionsSyncResourceModel struct {
 	CompanyModel       *CompanyModelModel `tfsdk:"company_model"`
 	Join               *JoinModel         `tfsdk:"join"`
 	ContactEmailColumn types.String       `tfsdk:"contact_email_column"`
+	ContactFilters     types.List         `tfsdk:"contact_filters"`
 	PermissionCount    types.Int64        `tfsdk:"permission_count"`
 }
 
@@ -199,6 +201,24 @@ func (r *PermissionsSyncResource) Schema(_ context.Context, _ resource.SchemaReq
 					),
 				},
 			},
+			"contact_filters": schema.ListAttribute{
+				Description: "Extra OData conditions a contact must meet to count as the signed-in person, " +
+					"all of which must hold — written like a table's filters, e.g. [\"cpa_portaluser eq true\"]. " +
+					"A contact with the signed-in email that fails them is \"not enabled\": every call answers " +
+					"403 with code \"contact_not_enabled\", and self-registration won't create a second contact " +
+					"to get round it. The API runs them against the scope's contacts before saving, so one " +
+					"Dataverse can't run fails the apply. Omit to let every active contact with the email sign in. " +
+					"Published as `contactFilters` in the scope's defaults.json.",
+				Optional:    true,
+				ElementType: types.StringType,
+				Validators: []validator.List{
+					listvalidator.SizeAtMost(10),
+					listvalidator.ValueStringsAre(
+						stringvalidator.LengthBetween(1, 500),
+						stringvalidator.RegexMatches(regexp.MustCompile(`\S`), "must not be blank"),
+					),
+				},
+			},
 			"permission_count": schema.Int64Attribute{
 				Description: "The number of routes with published baseline permissions.",
 				Computed:    true,
@@ -287,6 +307,13 @@ func (r *PermissionsSyncResource) publish(ctx context.Context, plan *Permissions
 	companyModel := buildCompanyModel(plan.CompanyModel)
 	join := buildJoin(plan.Join)
 	contactEmailColumn := plan.ContactEmailColumn.ValueString()
+	var contactFilters []string
+	if !plan.ContactFilters.IsNull() && !plan.ContactFilters.IsUnknown() {
+		if diags := plan.ContactFilters.ElementsAs(ctx, &contactFilters, false); diags.HasError() {
+			resp.AddError("Invalid contact_filters", "contact_filters must be a list of strings")
+			return
+		}
+	}
 
 	tflog.Info(ctx, "Publishing scope default permissions", map[string]interface{}{
 		"scope":                scope,
@@ -295,9 +322,10 @@ func (r *PermissionsSyncResource) publish(ctx context.Context, plan *Permissions
 		"company_model":        companyModel != nil,
 		"join":                 join != nil,
 		"contact_email_column": contactEmailColumn,
+		"contact_filters":      len(contactFilters),
 	})
 
-	if _, err := r.client.PublishDefaults(ctx, scope, permissions, allowSelfRegister, companyModel, join, contactEmailColumn); err != nil {
+	if _, err := r.client.PublishDefaults(ctx, scope, permissions, allowSelfRegister, companyModel, join, contactEmailColumn, contactFilters); err != nil {
 		resp.AddError("Failed to publish permissions", err.Error())
 		return
 	}
