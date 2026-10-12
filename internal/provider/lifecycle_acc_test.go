@@ -445,6 +445,7 @@ func TestAccPermissionsSync_removeSettings(t *testing.T) {
   default_permissions  = { case = ["me"] }
   allow_self_register  = true
   contact_email_column = "emailaddress2"
+  contact_filters      = ["cpa_portaluser eq true"]
   company_model        = { strategy = "parent-account" }
   join                 = { strategy = "domain-list", domain_field = "new_portaldomains" }`),
 			},
@@ -470,6 +471,14 @@ func TestAccPermissionsSync_invalidConfig(t *testing.T) {
 			{
 				Config:      permissionsSync(s, `  contact_email_column = "EmailAddress2"`),
 				ExpectError: regexp.MustCompile(`logical name`),
+			},
+			{
+				Config:      permissionsSync(s, `  contact_filters = ["   "]`),
+				ExpectError: regexp.MustCompile(`must not be blank`),
+			},
+			{
+				Config:      permissionsSync(s, `  contact_filters = [""]`),
+				ExpectError: regexp.MustCompile(`length`),
 			},
 			{
 				Config:      permissionsSync(s, `  company_model = { strategy = "holding-company" }`),

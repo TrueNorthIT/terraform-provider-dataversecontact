@@ -54,6 +54,12 @@ resource "dataversecontact_permissions_sync" "default" {
   # emailaddress1):
   #
   #   contact_email_column = "emailaddress2"
+  #
+  # For scopes where only some contacts may sign in (a contact that fails these
+  # gets a 403 "not set up for online access"; omit to let every active contact
+  # with the email in):
+  #
+  #   contact_filters = ["cpa_portaluser eq true"]
 }
 
 output "permission_count" {

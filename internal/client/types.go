@@ -202,6 +202,9 @@ type PublishDefaultsRequest struct {
 	// The contact column people sign in with. Empty is omitted, and the API
 	// then uses emailaddress1.
 	ContactEmailColumn string `json:"contactEmailColumn,omitempty"`
+	// Extra OData conditions a contact must meet to count as the signed-in
+	// person. Empty is omitted, and every active contact with the email counts.
+	ContactFilters []string `json:"contactFilters,omitempty"`
 }
 
 // JoinConfig mirrors the API's per-scope self-serve join config. Omitted (nil)

@@ -15,8 +15,9 @@ import (
 // nil publishes the classic parent-account (multi-contact) model. join is
 // optional — nil means registration just provisions an unlinked contact.
 // contactEmailColumn names the contact column people sign in with — empty
-// leaves it out, so the API uses emailaddress1.
-func (c *Client) PublishDefaults(ctx context.Context, scope string, permissions map[string][]string, allowSelfRegister bool, companyModel *CompanyModel, join *JoinConfig, contactEmailColumn string) (*PublishDefaultsResponse, error) {
+// leaves it out, so the API uses emailaddress1. contactFilters are extra OData
+// conditions a contact must meet to sign in — empty leaves them out.
+func (c *Client) PublishDefaults(ctx context.Context, scope string, permissions map[string][]string, allowSelfRegister bool, companyModel *CompanyModel, join *JoinConfig, contactEmailColumn string, contactFilters []string) (*PublishDefaultsResponse, error) {
 	url := c.adminURL(scope, "table-manager/defaults")
 	if permissions == nil {
 		permissions = map[string][]string{}
@@ -27,6 +28,7 @@ func (c *Client) PublishDefaults(ctx context.Context, scope string, permissions 
 		CompanyModel:       companyModel,
 		Join:               join,
 		ContactEmailColumn: contactEmailColumn,
+		ContactFilters:     contactFilters,
 	}
 	var resp PublishDefaultsResponse
 	if err := c.doJSON(ctx, "PUT", url, body, &resp); err != nil {

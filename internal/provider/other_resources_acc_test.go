@@ -167,6 +167,7 @@ func TestAccPermissionsSync(t *testing.T) {
   default_permissions  = { case = ["me"] }
   allow_self_register  = true
   contact_email_column = "emailaddress2"
+  contact_filters      = ["cpa_portaluser eq true", "address1_line1 eq 'banana road'"]
   company_model = {
     strategy            = "associated-accounts"
     associated_accounts = { relationship = "new_contact_account" }
@@ -180,6 +181,7 @@ func TestAccPermissionsSync(t *testing.T) {
 					"permissions":        map[string]any{"case": []any{"me"}},
 					"allowSelfRegister":  true,
 					"contactEmailColumn": "emailaddress2",
+					"contactFilters":     []any{"cpa_portaluser eq true", "address1_line1 eq 'banana road'"},
 					"companyModel": map[string]any{
 						"strategy":           "associated-accounts",
 						"associatedAccounts": map[string]any{"relationship": "new_contact_account"},
@@ -193,6 +195,7 @@ func TestAccPermissionsSync(t *testing.T) {
   default_permissions  = { case = ["me"] }
   allow_self_register  = true
   contact_email_column = "emailaddress2"
+  contact_filters      = ["cpa_portaluser eq true", "address1_line1 eq 'banana road'"]
   company_model = {
     strategy            = "associated-accounts"
     associated_accounts = { relationship = "new_contact_account" }
