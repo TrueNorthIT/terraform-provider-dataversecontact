@@ -19,3 +19,30 @@ resource "dataversecontact_custom_api" "expand_calendar" {
     ]
   })
 }
+
+# A custom API acting on the caller's own case: answers on
+# /me/actions/close-incident/{caseId} and /team/actions/close-incident/{caseId}.
+# The case id in the URL is checked against the "case" route's scoping and
+# written into IncidentResolution.incidentid@odata.bind. Needs the API release
+# with tiered custom APIs.
+resource "dataversecontact_custom_api" "close_incident" {
+  scope      = "default"
+  route_name = "close-incident"
+
+  schema_json = jsonencode({
+    routeName           = "close-incident"
+    dataverseUniqueName = "CloseIncident"
+    isFunction          = false
+    bindingType         = "global"
+    tiers               = ["me", "team"]
+    target = {
+      table        = "case"
+      recordIdPath = "IncidentResolution.incidentid@odata.bind"
+      filters      = ["statecode eq 0"]
+    }
+    requestParameters = [
+      { uniqueName = "IncidentResolution", type = "entity" },
+      { uniqueName = "Status", type = "integer" },
+    ]
+  })
+}

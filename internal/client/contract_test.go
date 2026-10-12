@@ -94,6 +94,10 @@ func TestContractCustomApiResponses(t *testing.T) {
 	if len(defs.Definitions) == 0 || defs.Definitions[0].DataverseUniqueName == "" {
 		t.Errorf("get-custom-api-definitions: %+v", defs)
 	}
+	// A definition without tiers reports them as null — a legacy definition.
+	if len(defs.Definitions) > 0 && defs.Definitions[0].Tiers != nil {
+		t.Errorf("get-custom-api-definitions: tiers = %v, want null", defs.Definitions[0].Tiers)
+	}
 
 	var save CustomApiSaveDraftResponse
 	decodeFixture(t, "put-custom-api-draft", &save)

@@ -222,6 +222,39 @@ resource "dataversecontact_custom_api" "expand_calendar" {
   })
 }
 
+# A citizen's own booking: answers only on
+# /me/actions/reschedule-booking/{servicebookingId}. The id in the URL is
+# checked against the servicebooking route's contact join, then written into
+# ServiceBookingId; CitizenId is filled from the signed-in caller. Replace
+# tn_RescheduleBooking with a custom API that exists in your Dataverse. Needs
+# the API release with tiered custom APIs.
+
+resource "dataversecontact_custom_api" "reschedule_booking" {
+  scope      = var.scope
+  route_name = "reschedule-booking"
+
+  schema_json = jsonencode({
+    routeName           = "reschedule-booking"
+    dataverseUniqueName = "tn_RescheduleBooking"
+    isFunction          = false
+    bindingType         = "global"
+    tiers               = ["me"]
+    target = {
+      table        = "servicebooking"
+      recordIdPath = "ServiceBookingId"
+    }
+    callerParameters = { CitizenId = "contactId" }
+    requestParameters = [
+      { uniqueName = "ServiceBookingId", type = "guid" },
+      { uniqueName = "NewSlotStart", type = "datetime" },
+      { uniqueName = "CitizenId", type = "guid" },
+    ]
+  })
+
+  # The target route must be published for calls to pass the ownership check.
+  depends_on = [dataversecontact_table.servicebooking]
+}
+
 # ── Baseline permissions — mandatory ────────────────────────────────────────
 # A scope with no published defaults grants nothing: every route answers
 # "403 Missing required permission", including reads.
@@ -232,9 +265,10 @@ resource "dataversecontact_permissions_sync" "this" {
   allow_self_register = true
 
   default_permissions = {
-    servicebooking = ["me", "write", "create"]
-    citizen        = ["me"]
-    booking        = ["me", "write"]
+    servicebooking     = ["me", "write", "create"]
+    citizen            = ["me"]
+    booking            = ["me", "write"]
+    reschedule-booking = ["invoke"]
   }
 
   triggers = {
@@ -243,7 +277,10 @@ resource "dataversecontact_permissions_sync" "this" {
       dataversecontact_table.servicebooking.id,
       dataversecontact_table.booking.id,
     ]))
-    apis_hash = sha256(dataversecontact_custom_api.expand_calendar.id)
+    apis_hash = sha256(join(",", [
+      dataversecontact_custom_api.expand_calendar.id,
+      dataversecontact_custom_api.reschedule_booking.id,
+    ]))
   }
 
   depends_on = [
@@ -251,6 +288,7 @@ resource "dataversecontact_permissions_sync" "this" {
     dataversecontact_table.servicebooking,
     dataversecontact_table.booking,
     dataversecontact_custom_api.expand_calendar,
+    dataversecontact_custom_api.reschedule_booking,
   ]
 }
 

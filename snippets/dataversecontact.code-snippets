@@ -161,5 +161,31 @@
       "  })",
       "}"
     ]
+  },
+  "dataversecontact custom api (tiered)": {
+    "scope": "terraform",
+    "prefix": "dvc-custom-api-tiered",
+    "description": "Register a Dataverse Custom API on the me/team/all tiers, checked against a table route",
+    "body": [
+      "resource \"dataversecontact_custom_api\" \"${1:name}\" {",
+      "  scope      = ${2:var.scope}",
+      "  route_name = \"${3:my-action}\"",
+      "",
+      "  schema_json = jsonencode({",
+      "    routeName           = \"${3:my-action}\"",
+      "    dataverseUniqueName = \"${4:tn_MyAction}\"",
+      "    isFunction          = ${5|false,true|} # true = GET function, false = POST action",
+      "    bindingType         = \"${6|global,entity|}\" # entity: also set boundEntitySetName, drop recordIdPath",
+      "    tiers               = [${7:\"me\", \"team\"}]",
+      "    target = {",
+      "      table        = \"${8:case}\" # a published route; its contact/account scoping checks the record",
+      "      recordIdPath = \"${9:CaseId}\" # unbound only: the parameter the URL's record id is written into",
+      "    }",
+      "    requestParameters = [",
+      "      { uniqueName = \"${9:CaseId}\", type = \"${10|guid,entityReference|}\" },",
+      "    ]",
+      "  })",
+      "}"
+    ]
   }
 }

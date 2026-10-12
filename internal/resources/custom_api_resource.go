@@ -52,7 +52,9 @@ func (r *CustomApiResource) Metadata(_ context.Context, req resource.MetadataReq
 func (r *CustomApiResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages a custom API configuration in the Dataverse Contact API. " +
-			"The schema is saved as a draft and immediately published.",
+			"The schema is saved as a draft and immediately published. `tiers` decides which of " +
+			"/{public,me,team,all}/actions/{name} it answers on, and `target` / `callerParameters` " +
+			"how a call is checked — see the Custom APIs guide.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Resource identifier in the format {scope}/{route_name}.",
@@ -77,10 +79,11 @@ func (r *CustomApiResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			},
 			"schema_json": schema.StringAttribute{
 				Description: "The custom API schema as a JSON string (CustomApiHint format: routeName, " +
-					"dataverseUniqueName, displayName, description, requiredPermission, isFunction, " +
-					"bindingType, publicInvoke, requestParameters, responseProperties — see the " +
-					"dataversecontact_custom_api example for the full shape). Usually jsonencode(...) " +
-					"or file(\"....customapi.json\").",
+					"dataverseUniqueName, displayName, description, requiredPermission (optional, defaults to " +
+					"{routeName}:invoke), isFunction, bindingType, boundEntitySetName, tiers, target, " +
+					"callerParameters, requestParameters, responseProperties; the legacy publicInvoke and " +
+					"ownershipCheck are still accepted — see the Custom APIs guide for the shapes and the " +
+					"rules the API enforces on apply). Usually jsonencode(...) or file(\"....customapi.json\").",
 				Required: true,
 				Validators: []validator.String{
 					ValidJSONObject(),

@@ -491,6 +491,12 @@ func (s *Server) customApiDefinitions(w http.ResponseWriter, scope string) {
 	for _, name := range sortedKeys(s.apis[scope]) {
 		def := clone(s.apis[scope][name])
 		def["source"] = "published"
+		// The API reports these as null when the definition leaves them out.
+		for _, key := range []string{"tiers", "target", "callerParameters", "ownershipCheck"} {
+			if _, ok := def[key]; !ok {
+				def[key] = nil
+			}
+		}
 		defs = append(defs, def)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"definitions": defs})
