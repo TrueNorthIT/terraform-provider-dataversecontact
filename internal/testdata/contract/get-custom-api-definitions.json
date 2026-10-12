@@ -12,6 +12,10 @@
       "boundEntityLogicalName": "calendar",
       "boundEntitySetName": "calendars",
       "publicInvoke": true,
+      "tiers": null,
+      "target": null,
+      "callerParameters": null,
+      "ownershipCheck": null,
       "requestParameters": [
         {
           "uniqueName": "Start",

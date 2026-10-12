@@ -125,6 +125,8 @@ type DeleteRecycledResponse struct {
 // --- Custom API Types ---
 
 // CustomApiDefinition represents a custom API as returned by GET /custom-api-definitions.
+// Tiers, Target, CallerParameters and OwnershipCheck are null when the
+// definition doesn't set them; a definition without Tiers is a legacy one.
 type CustomApiDefinition struct {
 	RouteName              string          `json:"routeName"`
 	Source                 string          `json:"source"`
@@ -138,6 +140,10 @@ type CustomApiDefinition struct {
 	BoundEntityLogicalName string          `json:"boundEntityLogicalName,omitempty"`
 	BoundEntitySetName     string          `json:"boundEntitySetName,omitempty"`
 	PublicInvoke           bool            `json:"publicInvoke"`
+	Tiers                  []string        `json:"tiers"`
+	Target                 json.RawMessage `json:"target,omitempty"`
+	CallerParameters       json.RawMessage `json:"callerParameters,omitempty"`
+	OwnershipCheck         json.RawMessage `json:"ownershipCheck,omitempty"`
 	RequestParameters      json.RawMessage `json:"requestParameters,omitempty"`
 	ResponseProperties     json.RawMessage `json:"responseProperties,omitempty"`
 }
