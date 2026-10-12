@@ -11,6 +11,7 @@ gets in each scope.
 · [Getting started](https://registry.terraform.io/providers/TrueNorthIT/dataversecontact/latest/docs/guides/getting-started)
 · [Permissions](https://registry.terraform.io/providers/TrueNorthIT/dataversecontact/latest/docs/guides/permissions)
 · [Parent-scoped children](https://registry.terraform.io/providers/TrueNorthIT/dataversecontact/latest/docs/guides/parent-scoped-children)
+· [Custom APIs](https://registry.terraform.io/providers/TrueNorthIT/dataversecontact/latest/docs/guides/custom-apis)
 
 For a complete copy-paste starting point (tables, reverse joins, a custom API
 and the permissions publish) see [`examples/full-scope`](examples/full-scope/main.tf).

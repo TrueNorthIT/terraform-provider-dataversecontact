@@ -20,7 +20,8 @@ in a new environment in minutes.
 New here? Start with the [Getting started](guides/getting-started) guide. The
 [Permissions](guides/permissions) and
 [Parent-scoped children](guides/parent-scoped-children) guides cover the two
-concepts that most often trip people up.
+concepts that most often trip people up. [Custom APIs](guides/custom-apis)
+covers who may call a Dataverse function or action, and on which record.
 
 ## Example Usage
 
