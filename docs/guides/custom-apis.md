@@ -116,6 +116,49 @@ resource "dataversecontact_custom_api" "close_incident" {
 Called as `POST /api/v2/{scope}/me/actions/close-incident/{caseId}` with
 `{ "IncidentResolution": { "subject": "Done" }, "Status": 5 }`.
 
+### Naming the record by its reference number
+
+When the plugin finds a case by its reference number rather than its GUID, set
+`target.recordKey` to that column (`ticketnumber`, or a custom column such as
+`lcc_caseref`). The URL can then carry the reference number or the GUID. The
+API finds the case in the same query that checks it belongs to the caller,
+and writes the reference number, **read from that case**, into a `string`
+parameter. A `guid` / `entityReference` parameter, or a bound API, gets the
+case's GUID.
+
+```terraform
+resource "dataversecontact_custom_api" "add_case_note" {
+  scope      = var.scope
+  route_name = "add-case-note"
+
+  schema_json = jsonencode({
+    routeName           = "add-case-note"
+    dataverseUniqueName = "lcc_AddCaseNote"
+    tiers               = ["me", "team"]
+    target = {
+      table        = "case"
+      recordIdPath = "CaseRef"
+      recordKey    = "ticketnumber"
+    }
+    requestParameters = [
+      { uniqueName = "CaseRef", type = "string" },
+      { uniqueName = "Note", type = "string" },
+    ]
+  })
+
+  depends_on = [dataversecontact_table.case]
+}
+```
+
+Called as `POST /api/v2/{scope}/me/actions/add-case-note/CAS-01234-X1Y2` with
+`{ "Note": "Called back" }`.
+
+The column needs a **single-column alternate key** in Dataverse whose index is
+`Active`: the reference number only names one case while Dataverse keeps it
+unique. Add the key in the solution that owns the table (maker portal: *Tables
+→ Case → Keys*) before applying; the apply fails with a 400 that says so
+until it's there.
+
 ### Caller-scoped (no record)
 
 `callerParameters` fills parameters from the signed-in caller — `contactId` or
@@ -203,6 +246,9 @@ names the problem.
   check through, and not be a lake table. If the route isn't published yet the
   definition is accepted, and calls fail closed until it is — add a
   `depends_on` on the `dataversecontact_table`.
+- `target.recordKey` must be a text column of the `target.table` route's table
+  with an active single-column alternate key, and not its primary key. An
+  inline target can't take one.
 - `ownershipCheck` can't be combined with `tiers`; `target` and
   `callerParameters` need `tiers`.
 
