@@ -182,6 +182,56 @@ resource "dataversecontact_custom_api" "my_upcoming_bookings" {
 }
 ```
 
+### Values the definition supplies
+
+Two ways to give a request parameter a value from the definition, deliberately
+different (API 1.30.0+):
+
+| | Client leaves it out | Client sends a value | Use for |
+|---|---|---|---|
+| `default` on a request parameter | the API sends the default | the client's value is used | an input the custom API declares required but that usually takes one value |
+| `fixedParameters` on the definition | the API sends the fixed value | **overwritten**, like `callerParameters` | a flag callers must never choose (`IsPrivate`, a source or channel code) |
+
+A default leaves the caller in control. For anything a caller mustn't decide,
+use `fixedParameters`.
+
+```terraform
+resource "dataversecontact_custom_api" "add_case_note" {
+  scope      = var.scope
+  route_name = "add-case-note"
+
+  schema_json = jsonencode({
+    routeName           = "add-case-note"
+    dataverseUniqueName = "lcc_AddCaseNote"
+    tiers               = ["me", "team"]
+    target = {
+      table        = "case"
+      recordIdPath = "CaseRef"
+      recordKey    = "ticketnumber"
+    }
+    # Always sent as false, whatever the client posts: a citizen can't file an
+    # internal-only note. Keep IsPrivate declared below; Dataverse requires it.
+    fixedParameters = { IsPrivate = false }
+    requestParameters = [
+      { uniqueName = "CaseRef", type = "string" },
+      { uniqueName = "Note", type = "string" },
+      { uniqueName = "IsPrivate", type = "boolean" },
+      { uniqueName = "Source", type = "string", default = "portal" },
+    ]
+  })
+
+  depends_on = [dataversecontact_table.case]
+}
+```
+
+Both are applied on every tier, `public` included, and a function receives
+them in its URL. A required parameter that is fixed or has a default never has
+to be sent by the client. The API's OpenAPI document leaves fixed parameters
+out of the request and says "Always sent as: `IsPrivate` = `false`"; a
+defaulted one stays in with an OpenAPI `default`. Apply these only once every
+API deployment reading the scope runs 1.30.0 or later: an older one ignores
+both, so the client's value would reach Dataverse.
+
 ### Public
 
 ```terraform
@@ -249,8 +299,20 @@ names the problem.
 - `target.recordKey` must be a text column of the `target.table` route's table
   with an active single-column alternate key, and not its primary key. An
   inline target can't take one.
-- `ownershipCheck` can't be combined with `tiers`; `target` and
-  `callerParameters` need `tiers`.
+- A `fixedParameters` value or a parameter's `default` must suit the
+  parameter's type: `true`/`false` for `boolean`, a whole number for `integer`
+  and `picklist`, a number for `decimal`, `float` and `money`, a string for
+  `string`, an ISO 8601 date or date-time string for `datetime`, a GUID string
+  for `guid`, and a list of strings for `stringArray` (actions only). `entity`,
+  `entityReference` and `entityCollection` parameters can't take either: they
+  name records, which come from the URL or the caller.
+- `fixedParameters` must name declared request parameters, and can't be the
+  `recordIdPath` parameter or a `callerParameters` entry, nor have a `default`.
+  A `default` can't be set on the `recordIdPath` parameter or a caller
+  parameter either. A fixed `guid` counts as checked for the `unchecked` rule
+  above; a default `guid` doesn't, because the client can still change it.
+- `ownershipCheck` can't be combined with `tiers`; `target`,
+  `callerParameters` and `fixedParameters` need `tiers`.
 
 `requiredPermission` is optional; it defaults to `{routeName}:invoke`.
 `tiers = null` is the same as leaving `tiers` out.
