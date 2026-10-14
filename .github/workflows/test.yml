@@ -125,10 +125,7 @@ jobs:
       - run: go mod download
       - run: go test ./... -v -timeout 120m
 
-  # ── Security (report-only) ─────────────────────────────────────────────
-  # Both jobs have continue-on-error, so a finding shows as a warning and
-  # blocks nothing. Once the current findings are fixed, delete those lines
-  # and make the jobs required checks.
+  # ── Security ───────────────────────────────────────────────────────────
 
   # Known vulnerabilities in the module's dependencies and the Go standard
   # library — only ones the provider's code actually reaches. Uses the Go
@@ -137,7 +134,6 @@ jobs:
     name: Go vulnerabilities
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    continue-on-error: true # report-only — remove to make this a gate
     env:
       # govulncheck itself needs a newer Go than go.mod pins; let `go install`
       # fetch that toolchain rather than fail.
@@ -153,7 +149,6 @@ jobs:
     name: Secrets (gitleaks)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    continue-on-error: true # report-only — remove to make this a gate
     steps:
       - uses: actions/checkout@v4
         with:
