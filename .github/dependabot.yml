@@ -1,0 +1,19 @@
+# Weekly dependency update PRs. Minor and patch bumps are grouped into one PR
+# per ecosystem to keep the noise down; majors come one by one.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
