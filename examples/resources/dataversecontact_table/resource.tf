@@ -186,3 +186,62 @@ resource "dataversecontact_permissions_sync" "fcc" {
 
   depends_on = [dataversecontact_table.case_with_service_answers]
 }
+
+# Emails the signed-in contact was on, with their attachments as files.
+#
+# The contact is reached through the email's activity parties (a reverse
+# step), and `match` counts a party only as From, To, CC or BCC. Without it,
+# the Regarding party Dataverse adds for the record an email is filed against
+# would make an internal email "one the contact was on".
+#
+# Attachments are rows of activitymimeattachments. Callers list them with
+# GET /me/emails/{id}/files and download one through a short-lived link from
+# POST /me/emails/{id}/files/{fileId}/link; the content is never inline.
+resource "dataversecontact_table" "emails" {
+  scope                  = "default"
+  route_name             = "emails"
+  dataverse_table        = "emails"
+  dataverse_logical_name = "email"
+  primary_key            = "activityid"
+  required_permission    = "emails"
+  default_select         = ["activityid", "subject", "sender", "torecipients", "senton", "attachmentcount"]
+  lookup_fields          = ["subject"]
+  filters                = ["statecode eq 1"] # sent or received, never drafts
+
+  contact_join_step {
+    table   = "activityparties"
+    from    = "email_activity_parties"
+    key     = "activitypartyid"
+    reverse = true
+    match   = { participationtypemask = [1, 2, 3, 4] } # sender, to, cc, bcc
+  }
+  contact_join_step {
+    table = "contacts"
+    from  = "partyid_contact"
+    key   = "contactid"
+  }
+
+  files = {
+    table         = "activitymimeattachments"
+    primary_key   = "activitymimeattachmentid"
+    parent_column = "objectid"
+    content       = "body"
+    file_name     = "filename"
+    mime_type     = "mimetype"
+    size          = "filesize"
+  }
+
+  fields = {
+    activityid      = { type = "string", description = "Email id", read_only = true }
+    subject         = { type = "string", description = "Subject", read_only = true }
+    description     = { type = "string", description = "Body (HTML; render it sanitised)", read_only = true }
+    sender          = { type = "string", description = "From address", read_only = true }
+    torecipients    = { type = "string", description = "To addresses", read_only = true }
+    senton          = { type = "datetime", description = "Sent on", read_only = true }
+    attachmentcount = { type = "number", description = "Number of attachments", read_only = true }
+  }
+}
+
+# A note's own attachment: the row is the file, so only the columns are named.
+# Its content column (documentbody) is removed from the table's fields.
+#   files = { content = "documentbody", file_name = "filename", mime_type = "mimetype", size = "filesize" }

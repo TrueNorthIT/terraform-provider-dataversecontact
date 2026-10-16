@@ -54,6 +54,86 @@ func TestJoinStepReverseRoundTrip(t *testing.T) {
 	}
 }
 
+// TestJoinStepMatchRoundTrip: a reverse step's match goes out as integers and
+// comes back as the same map; a step without one reads back null, so a
+// config that never mentions match plans no change.
+func TestJoinStepMatchRoundTrip(t *testing.T) {
+	var diags diag.Diagnostics
+	ctx := context.Background()
+	in := []JoinStepModel{
+		{
+			Table:   types.StringValue("activityparties"),
+			From:    types.StringValue("email_activity_parties"),
+			Key:     types.StringValue("activitypartyid"),
+			Reverse: types.BoolValue(true),
+			Match:   matchJSONToModel(map[string][]int64{"participationtypemask": {1, 2, 3, 4}}),
+		},
+		{
+			Table: types.StringValue("contacts"),
+			From:  types.StringValue("partyid_contact"),
+			Key:   types.StringValue("contactid"),
+			Match: types.MapNull(matchElementType),
+		},
+	}
+
+	j := joinStepsModelToJSON(ctx, in, &diags)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	raw, _ := json.Marshal(j)
+	if want := `"match":{"participationtypemask":[1,2,3,4]}`; !strings.Contains(string(raw), want) {
+		t.Errorf("expected %s in %s", want, raw)
+	}
+	if strings.Count(string(raw), `"match"`) != 1 {
+		t.Errorf("a step without match should send none: %s", raw)
+	}
+
+	out := joinStepsJSONToModel(j, nil)
+	if !out[0].Match.Equal(in[0].Match) {
+		t.Errorf("step 0: match changed in the round trip: %v", out[0].Match)
+	}
+	if !out[1].Match.IsNull() {
+		t.Errorf("step 1: no match should read back null, got %v", out[1].Match)
+	}
+}
+
+// TestFilesRoundTrip: own-row files send no child keys; child files send all
+// three; absent files are nil both ways.
+func TestFilesRoundTrip(t *testing.T) {
+	own := &FilesModel{
+		Table:        types.StringNull(),
+		PrimaryKey:   types.StringNull(),
+		ParentColumn: types.StringNull(),
+		Content:      types.StringValue("documentbody"),
+		FileName:     types.StringValue("filename"),
+		MimeType:     types.StringValue("mimetype"),
+		Size:         types.StringValue("filesize"),
+	}
+	raw, _ := json.Marshal(filesModelToJSON(own))
+	if want := `{"content":"documentbody","fileName":"filename","mimeType":"mimetype","size":"filesize"}`; string(raw) != want {
+		t.Errorf("own-row files: got %s, want %s", raw, want)
+	}
+	back := filesJSONToModel(filesModelToJSON(own))
+	if !back.Table.IsNull() || back.Content.ValueString() != "documentbody" {
+		t.Errorf("own-row files changed in the round trip: %+v", back)
+	}
+
+	child := *own
+	child.Table = types.StringValue("activitymimeattachments")
+	child.PrimaryKey = types.StringValue("activitymimeattachmentid")
+	child.ParentColumn = types.StringValue("objectid")
+	raw, _ = json.Marshal(filesModelToJSON(&child))
+	for _, want := range []string{`"table":"activitymimeattachments"`, `"primaryKey":"activitymimeattachmentid"`, `"parentColumn":"objectid"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("child files: expected %s in %s", want, raw)
+		}
+	}
+
+	if filesModelToJSON(nil) != nil || filesJSONToModel(nil) != nil {
+		t.Error("absent files should stay absent")
+	}
+}
+
 // TestPolymorphicLookupRoundTrip covers the family rule through
 // model → JSON → model.
 //

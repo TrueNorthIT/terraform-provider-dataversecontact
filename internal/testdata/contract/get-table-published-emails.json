@@ -1,0 +1,151 @@
+{
+  "source": "built-in",
+  "draft": null,
+  "schema": {
+    "routeName": "emails",
+    "description": "Sent and received emails the contact was on (From, To, CC or BCC), with their attachments as files",
+    "dataverseTable": "emails",
+    "dataverseLogicalName": "email",
+    "requiredPermission": "emails",
+    "primaryKey": "activityid",
+    "defaultSelect": [
+      "activityid",
+      "subject",
+      "sender",
+      "torecipients",
+      "directioncode",
+      "statuscode",
+      "senton",
+      "createdon",
+      "attachmentcount"
+    ],
+    "contactJoinPath": [
+      {
+        "table": "activityparties",
+        "from": "email_activity_parties",
+        "key": "activitypartyid",
+        "reverse": true,
+        "match": {
+          "participationtypemask": [
+            1,
+            2,
+            3,
+            4
+          ]
+        }
+      },
+      {
+        "table": "contacts",
+        "from": "partyid_contact",
+        "key": "contactid"
+      }
+    ],
+    "teamJoinPath": [
+      {
+        "table": "activityparties",
+        "from": "email_activity_parties",
+        "key": "activitypartyid",
+        "reverse": true,
+        "match": {
+          "participationtypemask": [
+            1,
+            2,
+            3,
+            4
+          ]
+        }
+      },
+      {
+        "table": "contacts",
+        "from": "partyid_contact",
+        "key": "contactid"
+      },
+      {
+        "table": "accounts",
+        "from": "parentcustomerid_account",
+        "key": "accountid"
+      }
+    ],
+    "lookupFields": [
+      "subject"
+    ],
+    "lookupSearchContains": [
+      "subject"
+    ],
+    "fields": {
+      "activityid": {
+        "type": "string",
+        "description": "Unique email identifier",
+        "readOnly": true
+      },
+      "subject": {
+        "type": "string",
+        "description": "Subject line",
+        "readOnly": true
+      },
+      "description": {
+        "type": "string",
+        "description": "Message body, as HTML. Untrusted: render it sanitised or as text",
+        "readOnly": true
+      },
+      "sender": {
+        "type": "string",
+        "description": "From address",
+        "readOnly": true
+      },
+      "torecipients": {
+        "type": "string",
+        "description": "To addresses, separated by semicolons",
+        "readOnly": true
+      },
+      "directioncode": {
+        "type": "boolean",
+        "description": "True when the email was sent out to the contact, false when it came in from them",
+        "readOnly": true
+      },
+      "statecode": {
+        "type": "choice",
+        "description": "Activity status (always Completed on this route)",
+        "readOnly": true
+      },
+      "statuscode": {
+        "type": "choice",
+        "description": "Status reason (Sent or Received)",
+        "readOnly": true
+      },
+      "senton": {
+        "type": "datetime",
+        "description": "When the email was sent",
+        "readOnly": true
+      },
+      "attachmentcount": {
+        "type": "number",
+        "description": "Number of attachments. List them with GET /{tier}/emails/{id}/files",
+        "readOnly": true
+      },
+      "createdon": {
+        "type": "datetime",
+        "description": "Date created",
+        "readOnly": true
+      },
+      "modifiedon": {
+        "type": "datetime",
+        "description": "Date last modified",
+        "readOnly": true
+      }
+    },
+    "filters": [
+      "statecode eq 1"
+    ],
+    "publicChoices": true,
+    "files": {
+      "table": "activitymimeattachments",
+      "primaryKey": "activitymimeattachmentid",
+      "parentColumn": "objectid",
+      "content": "body",
+      "fileName": "filename",
+      "mimeType": "mimetype",
+      "size": "filesize"
+    }
+  }
+}

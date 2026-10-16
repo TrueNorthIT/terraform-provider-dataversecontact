@@ -28,6 +28,11 @@ nested shapes are covered:
 | `put-custom-api-draft`, `post-custom-api-publish` | `server/handlers/custom-apis.ts` |
 | `put-defaults` | `handleScopeDefaults` PUT in `server/handlers/admin.ts` |
 
+**From the API source, until it ships** (`get-table-published-emails`): the bundled `emails`
+route from `server/config/scopes/default/email/emails.schema.json` (API 1.31.0, PR #447), in
+the admin GET's envelope. It carries `files` (child files) and a reverse join step with
+`match`. Re-record it from the live API once 1.31.0 is deployed.
+
 ## Refreshing
 
 When the API changes a response, update the fixture first, then make the client and the fake

@@ -246,6 +246,16 @@ func TestAccTable_everyAttribute(t *testing.T) {
   public_create          = true
   business_process       = {}
 
+  files = {
+    table         = "activitymimeattachments"
+    primary_key   = "activitymimeattachmentid"
+    parent_column = "objectid"
+    content       = "body"
+    file_name     = "filename"
+    mime_type     = "mimetype"
+    size          = "filesize"
+  }
+
   team_join_step {
     table = "accounts"
     from  = "customerid_account"
@@ -258,6 +268,7 @@ func TestAccTable_everyAttribute(t *testing.T) {
       from    = "incident_customer_contacts"
       key     = "contactid"
       reverse = true
+      match   = { participationtypemask = [1, 2] }
     }
   }
 
@@ -360,6 +371,23 @@ func TestAccTable_validateConfig(t *testing.T) {
 			{
 				Config:      caseTable(s, baseFields, `  parent_table { table = "account" }`),
 				ExpectError: regexp.MustCompile(`Incomplete parent_table block`),
+			},
+			{
+				// Child files name all three of table, primary_key and parent_column.
+				Config: caseTable(s, baseFields, `
+  files = {
+    table     = "activitymimeattachments"
+    content   = "body"
+    file_name = "filename"
+    mime_type = "mimetype"
+    size      = "filesize"
+  }`),
+				ExpectError: regexp.MustCompile(`(?s)Invalid Attribute Combination.*primary_key`),
+			},
+			{
+				Config: caseTable(s, baseFields, `
+  files = { content = "Document Body", file_name = "filename", mime_type = "mimetype", size = "filesize" }`),
+				ExpectError: regexp.MustCompile(`must be a Dataverse logical name`),
 			},
 		},
 	})

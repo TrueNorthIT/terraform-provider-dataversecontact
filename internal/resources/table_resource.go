@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -61,6 +63,7 @@ type TableResourceModel struct {
 	PublicRead           types.Bool            `tfsdk:"public_read"`
 	PublicCreate         types.Bool            `tfsdk:"public_create"`
 	BusinessProcess      *BusinessProcessModel `tfsdk:"business_process"`
+	Files                *FilesModel           `tfsdk:"files"`
 
 	// Fields map
 	Fields types.Map `tfsdk:"fields"`
@@ -85,6 +88,67 @@ type JoinStepModel struct {
 	From    types.String `tfsdk:"from"`
 	Key     types.String `tfsdk:"key"`
 	Reverse types.Bool   `tfsdk:"reverse"`
+	Match   types.Map    `tfsdk:"match"`
+}
+
+// FilesModel declares downloadable files on a table's rows. Nested attribute,
+// so it is nil when unset.
+type FilesModel struct {
+	Table        types.String `tfsdk:"table"`
+	PrimaryKey   types.String `tfsdk:"primary_key"`
+	ParentColumn types.String `tfsdk:"parent_column"`
+	Content      types.String `tfsdk:"content"`
+	FileName     types.String `tfsdk:"file_name"`
+	MimeType     types.String `tfsdk:"mime_type"`
+	Size         types.String `tfsdk:"size"`
+}
+
+// logicalNamePattern is what the API accepts for a column or entity set
+// name in `files` and in a join step's `match`.
+var logicalNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// matchElementType is a join step match's value type: column → option-set values.
+var matchElementType = types.ListType{ElemType: types.Int64Type}
+
+func logicalName(description string, required bool) schema.StringAttribute {
+	return schema.StringAttribute{
+		Description: description,
+		Required:    required,
+		Optional:    !required,
+		Validators: []validator.String{
+			stringvalidator.RegexMatches(logicalNamePattern, "must be a Dataverse logical name (lowercase letters, digits, underscores)"),
+		},
+	}
+}
+
+func filesAttribute() schema.SingleNestedAttribute {
+	child := func(description string, others ...string) schema.StringAttribute {
+		attr := logicalName(description, false)
+		paths := make([]path.Expression, len(others))
+		for i, other := range others {
+			paths[i] = path.MatchRelative().AtParent().AtName(other)
+		}
+		attr.Validators = append(attr.Validators, stringvalidator.AlsoRequires(paths...))
+		return attr
+	}
+	return schema.SingleNestedAttribute{
+		Description: "Downloadable files on this table's rows (a note's attachment, an email's " +
+			"attachments). Callers list them with GET /{tier}/{route}/{id}/files and get a " +
+			"short-lived download link with POST .../files/{fileId}/link; the content is never " +
+			"returned inline. Leave out table, primary_key and parent_column when the row is the " +
+			"file; set all three when the files are rows of a child table. A file on the row " +
+			"itself drops its content column from the table's fields.",
+		Optional: true,
+		Attributes: map[string]schema.Attribute{
+			"table":         child("Child files: the child table's entity set (e.g. \"activitymimeattachments\").", "primary_key", "parent_column"),
+			"primary_key":   child("Child files: the child table's primary key (e.g. \"activitymimeattachmentid\").", "table", "parent_column"),
+			"parent_column": child("Child files: the lookup on the child that points at this row (e.g. \"objectid\").", "table", "primary_key"),
+			"content":       logicalName("Column holding the base64 content (e.g. \"documentbody\", \"body\").", true),
+			"file_name":     logicalName("Column holding the file name.", true),
+			"mime_type":     logicalName("Column holding the MIME type.", true),
+			"size":          logicalName("Column holding the size in bytes.", true),
+		},
+	}
 }
 
 // AlternateContactJoinPathModel is a single alternate path with nested steps.
@@ -254,6 +318,18 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 						"through the parent that references it (e.g. booking via servicebooking).",
 					Optional: true,
 				},
+				"match": schema.MapAttribute{
+					Description: "Reverse steps only: conditions the related row must also meet, " +
+						"inside the same any() lambda — column logical name to the option-set " +
+						"values it may have, e.g. { participationtypemask = [1, 2, 3, 4] } so an " +
+						"email counts only when the contact is its sender or a recipient.",
+					Optional:    true,
+					ElementType: matchElementType,
+					Validators: []validator.Map{
+						mapvalidator.KeysAre(stringvalidator.RegexMatches(logicalNamePattern, "must be a column logical name")),
+						mapvalidator.ValueListsAre(listvalidator.SizeAtLeast(1)),
+					},
+				},
 			},
 		},
 	}
@@ -384,6 +460,7 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Default:     booldefault.StaticBool(false),
 			},
 			"business_process": businessProcessAttribute("this table's own"),
+			"files":            filesAttribute(),
 			"public_create": schema.BoolAttribute{
 				Description: "Whether unauthenticated POST is allowed on the public tier.",
 				Optional:    true,
