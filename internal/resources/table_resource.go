@@ -137,7 +137,8 @@ func filesAttribute() schema.SingleNestedAttribute {
 			"short-lived download link with POST .../files/{fileId}/link; the content is never " +
 			"returned inline. Leave out table, primary_key and parent_column when the row is the " +
 			"file; set all three when the files are rows of a child table. A file on the row " +
-			"itself drops its content column from the table's fields.",
+			"itself drops its content column from the table's fields. Needs Contact API 1.31.0 or " +
+			"later: an older API drops this key without an error.",
 		Optional: true,
 		Attributes: map[string]schema.Attribute{
 			"table":         child("Child files: the child table's entity set (e.g. \"activitymimeattachments\").", "primary_key", "parent_column"),
@@ -322,7 +323,9 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 					Description: "Reverse steps only: conditions the related row must also meet, " +
 						"inside the same any() lambda — column logical name to the option-set " +
 						"values it may have, e.g. { participationtypemask = [1, 2, 3, 4] } so an " +
-						"email counts only when the contact is its sender or a recipient.",
+						"email counts only when the contact is its sender or a recipient. Needs Contact API " +
+						"1.31.0 or later: an older API drops match without an error and joins on every " +
+						"related row, which for emails includes the Regarding party.",
 					Optional:    true,
 					ElementType: matchElementType,
 					Validators: []validator.Map{

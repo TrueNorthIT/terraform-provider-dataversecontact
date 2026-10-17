@@ -286,7 +286,7 @@ resource "dataversecontact_table" "emails" {
 - `description` (String) Human-readable description of this table.
 - `expand` (Block List) Expandable lookup fields — one level deep into related tables. (see [below for nested schema](#nestedblock--expand))
 - `fetch_xml` (String) FetchXML template for custom list queries.
-- `files` (Attributes) Downloadable files on this table's rows (a note's attachment, an email's attachments). Callers list them with GET /{tier}/{route}/{id}/files and get a short-lived download link with POST .../files/{fileId}/link; the content is never returned inline. Leave out table, primary_key and parent_column when the row is the file; set all three when the files are rows of a child table. A file on the row itself drops its content column from the table's fields. (see [below for nested schema](#nestedatt--files))
+- `files` (Attributes) Downloadable files on this table's rows (a note's attachment, an email's attachments). Callers list them with GET /{tier}/{route}/{id}/files and get a short-lived download link with POST .../files/{fileId}/link; the content is never returned inline. Leave out table, primary_key and parent_column when the row is the file; set all three when the files are rows of a child table. A file on the row itself drops its content column from the table's fields. Needs Contact API 1.31.0 or later: an older API drops this key without an error. (see [below for nested schema](#nestedatt--files))
 - `filters` (List of String) Always-on filter expressions applied to every query. Defaults to ["statecode eq 0"].
 - `icon` (String) Icon filename (e.g. "incident.svg").
 - `lookup_search_contains` (List of String) Lookup fields that use 'contains' instead of 'startswith'.
@@ -343,7 +343,7 @@ Required:
 
 Optional:
 
-- `match` (Map of List of Number) Reverse steps only: conditions the related row must also meet, inside the same any() lambda — column logical name to the option-set values it may have, e.g. { participationtypemask = [1, 2, 3, 4] } so an email counts only when the contact is its sender or a recipient.
+- `match` (Map of List of Number) Reverse steps only: conditions the related row must also meet, inside the same any() lambda — column logical name to the option-set values it may have, e.g. { participationtypemask = [1, 2, 3, 4] } so an email counts only when the contact is its sender or a recipient. Needs Contact API 1.31.0 or later: an older API drops match without an error and joins on every related row, which for emails includes the Regarding party.
 - `reverse` (Boolean) If true, `from` is a collection-valued navigation property; this step compiles to an OData any() lambda that scopes an ownerless child through the parent that references it (e.g. booking via servicebooking).
 
 
@@ -367,7 +367,7 @@ Required:
 
 Optional:
 
-- `match` (Map of List of Number) Reverse steps only: conditions the related row must also meet, inside the same any() lambda — column logical name to the option-set values it may have, e.g. { participationtypemask = [1, 2, 3, 4] } so an email counts only when the contact is its sender or a recipient.
+- `match` (Map of List of Number) Reverse steps only: conditions the related row must also meet, inside the same any() lambda — column logical name to the option-set values it may have, e.g. { participationtypemask = [1, 2, 3, 4] } so an email counts only when the contact is its sender or a recipient. Needs Contact API 1.31.0 or later: an older API drops match without an error and joins on every related row, which for emails includes the Regarding party.
 - `reverse` (Boolean) If true, `from` is a collection-valued navigation property; this step compiles to an OData any() lambda that scopes an ownerless child through the parent that references it (e.g. booking via servicebooking).
 
 
@@ -463,7 +463,7 @@ Required:
 
 Optional:
 
-- `match` (Map of List of Number) Reverse steps only: conditions the related row must also meet, inside the same any() lambda — column logical name to the option-set values it may have, e.g. { participationtypemask = [1, 2, 3, 4] } so an email counts only when the contact is its sender or a recipient.
+- `match` (Map of List of Number) Reverse steps only: conditions the related row must also meet, inside the same any() lambda — column logical name to the option-set values it may have, e.g. { participationtypemask = [1, 2, 3, 4] } so an email counts only when the contact is its sender or a recipient. Needs Contact API 1.31.0 or later: an older API drops match without an error and joins on every related row, which for emails includes the Regarding party.
 - `reverse` (Boolean) If true, `from` is a collection-valued navigation property; this step compiles to an OData any() lambda that scopes an ownerless child through the parent that references it (e.g. booking via servicebooking).
 
 ## Import
