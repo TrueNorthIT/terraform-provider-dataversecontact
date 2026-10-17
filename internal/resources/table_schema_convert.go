@@ -34,6 +34,7 @@ type SchemaHintJSON struct {
 	ParentTable               *ParentTableJSON         `json:"parentTable,omitempty"`
 	PolymorphicLookup         *PolymorphicLookupJSON   `json:"polymorphicLookup,omitempty"`
 	BusinessProcess           *BusinessProcessJSON     `json:"businessProcess,omitempty"`
+	Files                     *FilesJSON               `json:"files,omitempty"`
 	Expands                   []ExpandJSON             `json:"expands,omitempty"`
 	PublicChoices             *bool                    `json:"publicChoices,omitempty"`
 	PublicRead                *bool                    `json:"publicRead,omitempty"`
@@ -45,10 +46,23 @@ type SchemaHintJSON struct {
 
 // JoinStepJSON is a single step in a contact/team join path.
 type JoinStepJSON struct {
-	Table   string `json:"table"`
-	From    string `json:"from"`
-	Key     string `json:"key"`
-	Reverse bool   `json:"reverse,omitempty"`
+	Table   string             `json:"table"`
+	From    string             `json:"from"`
+	Key     string             `json:"key"`
+	Reverse bool               `json:"reverse,omitempty"`
+	Match   map[string][]int64 `json:"match,omitempty"`
+}
+
+// FilesJSON declares downloadable files on a table's rows: the row itself
+// (no table) or rows of a child table.
+type FilesJSON struct {
+	Table        string `json:"table,omitempty"`
+	PrimaryKey   string `json:"primaryKey,omitempty"`
+	ParentColumn string `json:"parentColumn,omitempty"`
+	Content      string `json:"content"`
+	FileName     string `json:"fileName"`
+	MimeType     string `json:"mimeType"`
+	Size         string `json:"size"`
 }
 
 // CreateDefaultJSON is a lookup field auto-bound on create.
@@ -209,6 +223,9 @@ func modelToSchemaJSON(ctx context.Context, model *TableResourceModel, diags *di
 	// The table's own business process. Nested attribute, so nil means unset.
 	hint.BusinessProcess = businessProcessModelToJSON(model.BusinessProcess)
 
+	// Downloadable files. Nested attribute, so nil means unset.
+	hint.Files = filesModelToJSON(model.Files)
+
 	// Expands
 	hint.Expands = expandsModelToJSON(ctx, model.Expand, diags)
 
@@ -306,6 +323,9 @@ func schemaJSONToModel(ctx context.Context, raw json.RawMessage, model *TableRes
 
 	// The table's own business process
 	model.BusinessProcess = businessProcessJSONToModel(hint.BusinessProcess)
+
+	// Downloadable files
+	model.Files = filesJSONToModel(hint.Files)
 
 	// Parent table
 	if hint.ParentTable != nil {
@@ -440,14 +460,26 @@ func joinStepsModelToJSON(ctx context.Context, steps []JoinStepModel, diags *dia
 	}
 	result := make([]JoinStepJSON, len(steps))
 	for i, s := range steps {
-		result[i] = JoinStepJSON{
-			Table:   s.Table.ValueString(),
-			From:    s.From.ValueString(),
-			Key:     s.Key.ValueString(),
-			Reverse: s.Reverse.ValueBool(),
-		}
+		result[i] = joinStepModelToJSON(ctx, s, diags)
 	}
 	return result
+}
+
+func joinStepModelToJSON(ctx context.Context, s JoinStepModel, diags *diag.Diagnostics) JoinStepJSON {
+	step := JoinStepJSON{
+		Table:   s.Table.ValueString(),
+		From:    s.From.ValueString(),
+		Key:     s.Key.ValueString(),
+		Reverse: s.Reverse.ValueBool(),
+	}
+	if !s.Match.IsNull() && !s.Match.IsUnknown() {
+		var match map[string][]int64
+		diags.Append(s.Match.ElementsAs(ctx, &match, false)...)
+		if len(match) > 0 {
+			step.Match = match
+		}
+	}
+	return step
 }
 
 func joinStepsJSONToModel(steps []JoinStepJSON, prior []JoinStepModel) []JoinStepModel {
@@ -465,9 +497,27 @@ func joinStepsJSONToModel(steps []JoinStepJSON, prior []JoinStepModel) []JoinSte
 			From:    types.StringValue(s.From),
 			Key:     types.StringValue(s.Key),
 			Reverse: keepFalse(s.Reverse, priorReverse),
+			Match:   matchJSONToModel(s.Match),
 		}
 	}
 	return result
+}
+
+// matchJSONToModel is null when the step has no match, so a config that
+// leaves it out plans no change.
+func matchJSONToModel(match map[string][]int64) types.Map {
+	if len(match) == 0 {
+		return types.MapNull(matchElementType)
+	}
+	elements := make(map[string]attr.Value, len(match))
+	for column, values := range match {
+		items := make([]attr.Value, len(values))
+		for i, v := range values {
+			items[i] = types.Int64Value(v)
+		}
+		elements[column] = types.ListValueMust(types.Int64Type, items)
+	}
+	return types.MapValueMust(matchElementType, elements)
 }
 
 // ── Alternate contact join path helpers ─────────────────────────────────
@@ -480,12 +530,7 @@ func alternateJoinPathsModelToJSON(ctx context.Context, paths []AlternateContact
 	for i, p := range paths {
 		steps := make([]JoinStepJSON, len(p.Step))
 		for j, s := range p.Step {
-			steps[j] = JoinStepJSON{
-				Table:   s.Table.ValueString(),
-				From:    s.From.ValueString(),
-				Key:     s.Key.ValueString(),
-				Reverse: s.Reverse.ValueBool(),
-			}
+			steps[j] = joinStepModelToJSON(ctx, s, diags)
 		}
 		result[i] = steps
 	}
@@ -640,6 +685,36 @@ func businessProcessJSONToModel(bp *BusinessProcessJSON) *BusinessProcessModel {
 		return nil
 	}
 	return &BusinessProcessModel{ExposeAs: stringOrNull(bp.ExposeAs)}
+}
+
+func filesModelToJSON(f *FilesModel) *FilesJSON {
+	if f == nil {
+		return nil
+	}
+	return &FilesJSON{
+		Table:        f.Table.ValueString(),
+		PrimaryKey:   f.PrimaryKey.ValueString(),
+		ParentColumn: f.ParentColumn.ValueString(),
+		Content:      f.Content.ValueString(),
+		FileName:     f.FileName.ValueString(),
+		MimeType:     f.MimeType.ValueString(),
+		Size:         f.Size.ValueString(),
+	}
+}
+
+func filesJSONToModel(f *FilesJSON) *FilesModel {
+	if f == nil {
+		return nil
+	}
+	return &FilesModel{
+		Table:        stringOrNull(f.Table),
+		PrimaryKey:   stringOrNull(f.PrimaryKey),
+		ParentColumn: stringOrNull(f.ParentColumn),
+		Content:      types.StringValue(f.Content),
+		FileName:     types.StringValue(f.FileName),
+		MimeType:     types.StringValue(f.MimeType),
+		Size:         types.StringValue(f.Size),
+	}
 }
 
 func stringOrNull(s string) types.String {
