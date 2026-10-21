@@ -72,22 +72,27 @@ func (c *Client) PermanentlyDeleteCustomApi(ctx context.Context, scope, routeNam
 	return err
 }
 
-// SaveAndPublishCustomApi atomically saves a draft and publishes a custom API.
-func (c *Client) SaveAndPublishCustomApi(ctx context.Context, scope, routeName string, schemaJSON json.RawMessage) (*CustomApiPublishResponse, error) {
-	// Step 1: Save draft
-	_, err := c.SaveCustomApiDraft(ctx, scope, routeName, schemaJSON)
+// SaveAndPublishCustomApi saves a draft and publishes a custom API. A publish
+// that answers 200 but reports the route in its errors list discards the
+// draft and fails, as for tables. The save response is returned even with an
+// error, for the warnings it carries.
+func (c *Client) SaveAndPublishCustomApi(ctx context.Context, scope, routeName string, schemaJSON json.RawMessage) (*CustomApiSaveDraftResponse, error) {
+	save, err := c.SaveCustomApiDraft(ctx, scope, routeName, schemaJSON)
 	if err != nil {
 		return nil, fmt.Errorf("failed to save custom API draft: %w", err)
 	}
 
-	// Step 2: Publish
+	discard := func() string { return discardOutcome(routeName, c.DiscardCustomApiDraft(ctx, scope, routeName)) }
+
 	publishResp, err := c.PublishCustomApis(ctx, scope, []string{routeName})
 	if err != nil {
-		_ = c.DiscardCustomApiDraft(ctx, scope, routeName)
-		return nil, fmt.Errorf("failed to publish custom API (draft discarded): %w", err)
+		return save, fmt.Errorf("failed to publish custom API (%s): %w", discard(), err)
+	}
+	if err := routeNotPublished(routeName, publishResp.Published, publishResp.Errors); err != nil {
+		return save, fmt.Errorf("%w (%s)", err, discard())
 	}
 
-	return publishResp, nil
+	return save, nil
 }
 
 // DeleteCustomApi performs the full delete lifecycle: remove → permanent delete.

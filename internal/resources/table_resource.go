@@ -980,9 +980,12 @@ func (r *TableResource) Create(ctx context.Context, req resource.CreateRequest, 
 		"route_name": routeName,
 	})
 
-	_, err := r.client.SaveAndPublishTable(ctx, scope, routeName, schemaJSON)
+	save, err := r.client.SaveAndPublishTable(ctx, scope, routeName, schemaJSON)
+	if save != nil {
+		addSaveWarnings(&resp.Diagnostics, routeName, save.Validation, save.Warnings)
+	}
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to create table", err.Error())
+		addSaveError(&resp.Diagnostics, "Failed to create table", err)
 		return
 	}
 
@@ -1041,9 +1044,12 @@ func (r *TableResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		"route_name": routeName,
 	})
 
-	_, err := r.client.SaveAndPublishTable(ctx, scope, routeName, schemaJSON)
+	save, err := r.client.SaveAndPublishTable(ctx, scope, routeName, schemaJSON)
+	if save != nil {
+		addSaveWarnings(&resp.Diagnostics, routeName, save.Validation, save.Warnings)
+	}
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to update table", err.Error())
+		addSaveError(&resp.Diagnostics, "Failed to update table", err)
 		return
 	}
 

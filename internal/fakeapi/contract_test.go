@@ -24,11 +24,12 @@ func TestFakeMatchesContractFixtures(t *testing.T) {
 	s.Warnings = []Issue{{Severity: "warning", Field: "fields.title", Code: "TYPE_MISMATCH", Message: "m"}}
 	s.UnknownColumns = map[string][]string{"incident": {"new_gone"}}
 	s.PublishErrors = map[string]string{"contact": "Draft blob not found"}
+	s.RuleWarnings = []RuleFinding{{Rule: "me-only-route-name", Severity: "warning", Subject: "table", Route: "case", Message: "m"}}
 
 	table := map[string]any{
 		"routeName": "case", "dataverseTable": "incidents", "dataverseLogicalName": "incident",
 		"primaryKey": "incidentid", "requiredPermission": "case",
-		"defaultSelect": []any{"incidentid", "new_gone"}, "lookupFields": []any{"title"},
+		"defaultSelect": []any{"incidentid", "new_gone"}, "lookupFields": []any{"new_gone"},
 		"fields": map[string]any{
 			"incidentid": map[string]any{"type": "string", "description": "Id"},
 			"new_gone":   map[string]any{"type": "string", "description": "Not in Dataverse"},

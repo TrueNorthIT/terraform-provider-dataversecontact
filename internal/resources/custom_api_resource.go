@@ -141,9 +141,12 @@ func (r *CustomApiResource) Create(ctx context.Context, req resource.CreateReque
 		"route_name": routeName,
 	})
 
-	_, err := r.client.SaveAndPublishCustomApi(ctx, scope, routeName, schemaJSON)
+	save, err := r.client.SaveAndPublishCustomApi(ctx, scope, routeName, schemaJSON)
+	if save != nil {
+		addSaveWarnings(&resp.Diagnostics, routeName, nil, save.Warnings)
+	}
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to create custom API", err.Error())
+		addSaveError(&resp.Diagnostics, "Failed to create custom API", err)
 		return
 	}
 
@@ -194,9 +197,12 @@ func (r *CustomApiResource) Update(ctx context.Context, req resource.UpdateReque
 		"route_name": routeName,
 	})
 
-	_, err := r.client.SaveAndPublishCustomApi(ctx, scope, routeName, schemaJSON)
+	save, err := r.client.SaveAndPublishCustomApi(ctx, scope, routeName, schemaJSON)
+	if save != nil {
+		addSaveWarnings(&resp.Diagnostics, routeName, nil, save.Warnings)
+	}
 	if err != nil {
-		resp.Diagnostics.AddError("Failed to update custom API", err.Error())
+		addSaveError(&resp.Diagnostics, "Failed to update custom API", err)
 		return
 	}
 

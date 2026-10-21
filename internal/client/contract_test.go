@@ -47,7 +47,8 @@ func TestContractTableResponses(t *testing.T) {
 	var save SaveDraftResponse
 	decodeFixture(t, "put-table-draft", &save)
 	if save.Draft == nil || save.Draft.RouteName == "" || save.Validation == nil ||
-		save.Validation.Errors[0].Code == "" || save.Validation.Warnings[0].Code == "" {
+		save.Validation.Errors[0].Code == "" || save.Validation.Warnings[0].Code == "" ||
+		len(save.Warnings) == 0 || save.Warnings[0].Rule == "" || save.Warnings[0].Route == nil {
 		t.Errorf("put-table-draft: %+v", save)
 	}
 

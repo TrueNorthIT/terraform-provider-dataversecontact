@@ -65,6 +65,18 @@ type SaveDraftResponse struct {
 	Message    string          `json:"message"`
 	Draft      *DraftInfo      `json:"draft"`
 	Validation *ValidationInfo `json:"validation,omitempty"`
+	// Warnings are the API's config-rule warnings: saved, but worth fixing.
+	Warnings []ConfigFinding `json:"warnings,omitempty"`
+}
+
+// ConfigFinding is one config-rule finding. A save is refused (400) on an
+// error, so a saved draft only ever carries warnings.
+type ConfigFinding struct {
+	Rule     string  `json:"rule"`
+	Severity string  `json:"severity"`
+	Subject  string  `json:"subject"`
+	Route    *string `json:"route"`
+	Message  string  `json:"message"`
 }
 
 // ValidationInfo represents validation results.
@@ -173,6 +185,8 @@ type CustomApiManagerResponse struct {
 type CustomApiSaveDraftResponse struct {
 	Message string     `json:"message"`
 	Draft   *DraftInfo `json:"draft"`
+	// Warnings are the API's config-rule warnings, as for tables.
+	Warnings []ConfigFinding `json:"warnings,omitempty"`
 }
 
 // CustomApiPublishRequest is the request body for POST /custom-api-manager/publish.

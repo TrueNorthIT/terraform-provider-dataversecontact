@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
+	"strings"
 )
 
 // GetTableDefinitions returns all table definitions for a scope.
@@ -83,24 +86,167 @@ func (c *Client) PermanentlyDeleteTable(ctx context.Context, scope, routeName st
 	return err
 }
 
-// SaveAndPublishTable atomically saves a draft and publishes a table.
-// This is a convenience method that performs two API calls.
-func (c *Client) SaveAndPublishTable(ctx context.Context, scope, routeName string, schemaJSON json.RawMessage) (*PublishResponse, error) {
-	// Step 1: Save draft
-	_, err := c.SaveTableDraft(ctx, scope, routeName, schemaJSON)
+// SaveAndPublishTable saves a draft and publishes it.
+//
+// Both calls can answer 200 without doing what was asked. The save drops
+// fields Dataverse doesn't have (see StrippedFieldsError), and the publish
+// reports a route it couldn't publish in its errors list. Either way the
+// draft is discarded and an error returned. A strip is caught before
+// anything is published; a publish error may still have published.
+//
+// The save response is returned even with an error, for the warnings it
+// carries.
+func (c *Client) SaveAndPublishTable(ctx context.Context, scope, routeName string, schemaJSON json.RawMessage) (*SaveDraftResponse, error) {
+	save, err := c.SaveTableDraft(ctx, scope, routeName, schemaJSON)
 	if err != nil {
 		return nil, fmt.Errorf("failed to save draft: %w", err)
 	}
+	discard := func() string { return discardOutcome(routeName, c.DiscardTableDraft(ctx, scope, routeName)) }
 
-	// Step 2: Publish
-	publishResp, err := c.PublishTables(ctx, scope, []string{routeName})
+	stripped, err := c.findStrippedFields(ctx, scope, routeName, schemaJSON, save.Validation)
 	if err != nil {
-		// Try to discard the draft on publish failure
-		_ = c.DiscardTableDraft(ctx, scope, routeName)
-		return nil, fmt.Errorf("failed to publish (draft discarded): %w", err)
+		return save, fmt.Errorf("could not read back the saved draft of %q to check it, so nothing was published (%s): %w", routeName, discard(), err)
+	}
+	if stripped != nil {
+		stripped.Draft = discard()
+		return save, stripped
 	}
 
-	return publishResp, nil
+	publishResp, err := c.PublishTables(ctx, scope, []string{routeName})
+	if err != nil {
+		return save, fmt.Errorf("failed to publish (%s): %w", discard(), err)
+	}
+	if err := routeNotPublished(routeName, publishResp.Published, publishResp.Errors); err != nil {
+		return save, fmt.Errorf("%w (%s)", err, discard())
+	}
+
+	return save, nil
+}
+
+// discardOutcome says what became of a draft after a refused save. A draft
+// left behind goes live with the next Table Manager "Publish all", so the
+// message says so rather than claim it was discarded.
+func discardOutcome(route string, err error) string {
+	switch {
+	case err == nil:
+		return "draft discarded"
+	case IsNotFound(err):
+		return "no draft left"
+	default:
+		return fmt.Sprintf("the draft of %q could not be discarded and is still saved, so a Table Manager \"Publish all\" would publish it: %v", route, err)
+	}
+}
+
+// StrippedField is a field the API dropped from a saved draft.
+type StrippedField struct {
+	Name    string
+	Message string
+}
+
+// StrippedFieldsError reports fields the API dropped from a saved draft. It
+// drops a field whose column the Dataverse table doesn't have, still answers
+// the save with a 200, and publishing would replace the table with one
+// missing those fields.
+type StrippedFieldsError struct {
+	Route  string
+	Fields []StrippedField
+	// Draft says what became of the draft: discarded, or left behind.
+	Draft string
+}
+
+func (e *StrippedFieldsError) Error() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "the API dropped %d field(s) from %q, so nothing was published (%s):", len(e.Fields), e.Route, e.Draft)
+	for _, f := range e.Fields {
+		fmt.Fprintf(&b, "\n  - %s: %s", f.Name, f.Message)
+	}
+	return b.String()
+}
+
+// IsStrippedField reports whether a validation error is one the API acts on
+// by deleting the field: FIELD_NOT_FOUND on a "fields.<name>" path, as the
+// API's draft PUT selects them.
+func IsStrippedField(issue ValidationIssue) bool {
+	return issue.Code == "FIELD_NOT_FOUND" && strings.HasPrefix(issue.Field, "fields.")
+}
+
+// findStrippedFields reads back the draft just saved and lists the fields
+// sent that aren't in it. The save response can't be relied on for this: the
+// API validates again after stripping and answers with that result, which no
+// longer mentions the stripped fields. The read is cheap, because the table
+// GET answers from the draft before loading anything else.
+//
+// The API's FIELD_NOT_FOUND message is used when the response does carry one
+// (it keeps the first result when the second validation fails).
+func (c *Client) findStrippedFields(ctx context.Context, scope, routeName string, sent json.RawMessage, v *ValidationInfo) (*StrippedFieldsError, error) {
+	var want struct {
+		LogicalName string                     `json:"dataverseLogicalName"`
+		Fields      map[string]json.RawMessage `json:"fields"`
+	}
+	if err := json.Unmarshal(sent, &want); err != nil {
+		return nil, fmt.Errorf("reading the schema sent: %w", err)
+	}
+	if len(want.Fields) == 0 {
+		return nil, nil
+	}
+
+	got, err := c.GetTable(ctx, scope, routeName)
+	if err != nil {
+		return nil, err
+	}
+	if got.Source != "draft" {
+		return nil, fmt.Errorf("the API answered with the %s table instead of the draft, which something else published or discarded meanwhile", got.Source)
+	}
+	var saved struct {
+		Fields map[string]json.RawMessage `json:"fields"`
+	}
+	if err := json.Unmarshal(got.Schema, &saved); err != nil {
+		return nil, fmt.Errorf("reading the saved draft: %w", err)
+	}
+
+	messages := map[string]string{}
+	if v != nil {
+		for _, issue := range v.Errors {
+			if IsStrippedField(issue) {
+				messages[strings.TrimPrefix(issue.Field, "fields.")] = issue.Message
+			}
+		}
+	}
+	table := want.LogicalName
+	if table == "" {
+		table = "its Dataverse table"
+	}
+	var stripped []StrippedField
+	for _, name := range slices.Sorted(maps.Keys(want.Fields)) {
+		if _, kept := saved.Fields[name]; kept {
+			continue
+		}
+		msg := messages[name]
+		if msg == "" {
+			msg = fmt.Sprintf("The API dropped %q from the saved draft, which it does when %s has no such column", name, table)
+		}
+		stripped = append(stripped, StrippedField{Name: name, Message: msg})
+	}
+	if len(stripped) == 0 {
+		return nil, nil
+	}
+	return &StrippedFieldsError{Route: routeName, Fields: stripped}, nil
+}
+
+// routeNotPublished turns a publish that answered 200 but didn't publish
+// route into an error, using the API's own reason when it gave one. The API
+// can fail after writing the published table (deleting the draft), so the
+// message doesn't promise nothing changed.
+func routeNotPublished(route string, published []string, errs []RouteError) error {
+	for _, e := range errs {
+		if e.RouteName == route {
+			return fmt.Errorf("the API saved the draft but reported an error publishing %q, so it may not have been published: %s", route, e.Error)
+		}
+	}
+	if !slices.Contains(published, route) {
+		return fmt.Errorf("the API saved the draft but did not report %q as published, so it may not have been", route)
+	}
+	return nil
 }
 
 // DeleteTable performs the full delete lifecycle: unpublish → remove → permanent delete.
