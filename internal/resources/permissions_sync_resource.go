@@ -104,6 +104,8 @@ func (r *PermissionsSyncResource) Schema(_ context.Context, _ resource.SchemaReq
 					"Known tokens: the read tiers \"me\" (rows reachable from the caller's own contact via the " +
 					"table's contact join), \"team\" and \"all\" (every row), plus \"write\" (update within the " +
 					"granted read tier), \"write:all\" and \"create\". " +
+					"A table's documents.permission is a key here too (e.g. casedocuments = [\"me\"]); only " +
+					"its read tiers apply. " +
 					"Published as the `permissions` object of the scope's defaults.json.",
 				Optional:    true,
 				ElementType: types.ListType{ElemType: types.StringType},

@@ -33,6 +33,12 @@ route from `server/config/scopes/default/email/emails.schema.json` (API 1.31.0, 
 the admin GET's envelope. It carries `files` (child files) and a reverse join step with
 `match`. Re-record it from the live API once 1.31.0 is deployed.
 
+**From the API source, until it ships** (`get-table-published-case-documents`): the recorded
+`get-table-published-case` with a `documents` key added, shaped as `DocumentsSettings` in
+`server/config/scopes/types.ts` (API 1.34.0, #460): permission, folder, typed columns and a
+filter. The admin GET returns the hint as authored, so this is what comes back. Re-record it from
+the live API once 1.34.0 is deployed.
+
 ## Refreshing
 
 When the API changes a response, update the fixture first, then make the client and the fake
