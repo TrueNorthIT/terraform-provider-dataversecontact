@@ -221,6 +221,130 @@ func TestAccTable_bindFieldDerivedOnLaterSave(t *testing.T) {
 	})
 }
 
+// An API that keeps derived values out of the schema (Contact API #465)
+// reads back what was sent, so an unset bind_field plans as null, known, on
+// every change: no "(known after apply)", and nothing to get wrong when the
+// API starts deriving later (#30).
+func TestAccTable_bindFieldWithAPIOmittingDerived(t *testing.T) {
+	s := fakeapi.New(t)
+	s.OmitDerived = true
+
+	lookups := baseFields + `
+    customerid = { type = "lookup", description = "Customer", lookup_table = "contact" }
+    new_siteid = { type = "lookup", description = "Site", lookup_table = "site", bind_field = "new_site_override" }`
+	bindOf := func(field string) tfjsonpath.Path {
+		return tfjsonpath.New("fields").AtMapKey(field).AtMapKey("bind_field")
+	}
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             tablesGone(s),
+		Steps: []resource.TestStep{
+			{
+				Config: caseTable(s, lookups),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, bindOf("customerid"), knownvalue.Null()),
+					statecheck.ExpectKnownValue(caseAddress, bindOf("new_siteid"), knownvalue.StringExact("new_site_override")),
+				},
+			},
+			{
+				// The API starts deriving one; an unrelated change saves the table.
+				PreConfig: func() { s.SetNavProps(map[string]string{"customerid": "customerid_contact"}) },
+				Config: caseTable(s, lookups+`
+    description = { type = "string", description = "Details" }`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectKnownValue(caseAddress, bindOf("customerid"), knownvalue.Null()),
+					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, bindOf("customerid"), knownvalue.Null()),
+				},
+				Check: func(*terraform.State) error {
+					// Stored for requests all the same.
+					f := s.Table("default", "case")["fields"].(map[string]any)["customerid"].(map[string]any)
+					if f["bindField"] != "customerid_contact" {
+						return fmt.Errorf("stored bindField = %v, want customerid_contact", f["bindField"])
+					}
+					return nil
+				},
+			},
+			{
+				// Retargeting the lookup reads back as sent too.
+				Config: caseTable(s, strings.Replace(lookups, `lookup_table = "contact"`, `lookup_table = "account"`, 1)),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectKnownValue(caseAddress, bindOf("customerid"), knownvalue.Null()),
+					},
+				},
+			},
+			{
+				ResourceName:      caseAddress,
+				ImportState:       true,
+				ImportStateId:     "default/case",
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+// State written against an older API, which returned a derived bind_field
+// inside the schema, must survive the API's upgrade: no plan change, and
+// later updates still apply cleanly.
+func TestAccTable_bindFieldAcrossAPIUpgrade(t *testing.T) {
+	s := fakeapi.New(t)
+	s.NavProps = map[string]string{"customerid": "customerid_contact"}
+
+	lookups := baseFields + `
+    customerid = { type = "lookup", description = "Customer", lookup_table = "contact" }`
+	bindOf := func(field string) tfjsonpath.Path {
+		return tfjsonpath.New("fields").AtMapKey(field).AtMapKey("bind_field")
+	}
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             tablesGone(s),
+		Steps: []resource.TestStep{
+			{
+				// Older API: the derived value lands in state.
+				Config: caseTable(s, lookups),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, bindOf("customerid"), knownvalue.StringExact("customerid_contact")),
+				},
+			},
+			{
+				// Upgraded API, same config: nothing to do.
+				PreConfig: func() { s.SetOmitDerived(true) },
+				Config:    caseTable(s, lookups),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
+			{
+				// An unrelated change keeps the value, and the apply is consistent.
+				Config: caseTable(s, lookups+`
+    description = { type = "string", description = "Details" }`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectKnownValue(caseAddress, bindOf("customerid"), knownvalue.StringExact("customerid_contact")),
+					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, bindOf("customerid"), knownvalue.StringExact("customerid_contact")),
+				},
+			},
+			{
+				// Retargeting drops the old value; the API derives a new one out of sight.
+				PreConfig: func() { s.SetNavProps(map[string]string{"customerid": "customerid_account"}) },
+				Config:    caseTable(s, strings.Replace(lookups, `lookup_table = "contact"`, `lookup_table = "account"`, 1)),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectKnownValue(caseAddress, bindOf("customerid"), knownvalue.Null()),
+					},
+				},
+			},
+		},
+	})
+}
+
 // #17: validation findings are objects. Any save that drew a warning failed
 // to decode.
 func TestAccTable_validationWarnings(t *testing.T) {

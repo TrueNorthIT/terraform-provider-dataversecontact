@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
@@ -252,13 +253,8 @@ func (m fieldCountFromFields) PlanModifyInt64(ctx context.Context, req planmodif
 	resp.PlanValue = types.Int64Value(int64(len(fields.Elements())))
 }
 
-// bindFieldFromState carries a field's derived bind_field forward from state
-// when bind_field is unset and the field's type and lookup_table are
-// unchanged. The API derives it from the attribute's SchemaName, so it only
-// moves when the field itself does; otherwise it stays unknown until apply.
-// A null on a lookup with a lookup_table also stays unknown, because the API
-// can derive one on any save: a table last saved before it started deriving
-// gets a bind_field the next time anything else changes (#30).
+// bindFieldFromState plans an unset bind_field as what the API will read
+// back (see plannedBindField).
 type bindFieldFromState struct{}
 
 func (m bindFieldFromState) Description(_ context.Context) string {
@@ -276,6 +272,7 @@ func (m bindFieldFromState) PlanModifyString(ctx context.Context, req planmodifi
 
 	field := req.Path.ParentPath()
 	planned := map[string]types.String{}
+	unchanged := true
 	for _, name := range []string{"type", "lookup_table"} {
 		var value, prior types.String
 		resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, field.AtName(name), &value)...)
@@ -285,14 +282,53 @@ func (m bindFieldFromState) PlanModifyString(ctx context.Context, req planmodifi
 		}
 		// A null prior type means the field is new to this table.
 		if (name == "type" && prior.IsNull()) || !value.Equal(prior) {
-			return
+			unchanged = false
 		}
 		planned[name] = value
 	}
-	if req.StateValue.IsNull() && planned["type"].ValueString() == "lookup" && !planned["lookup_table"].IsNull() {
-		return
+	omits, diags := apiOmitsDerived(ctx, req.Private)
+	resp.Diagnostics.Append(diags...)
+	derivable := planned["type"].ValueString() == "lookup" && !planned["lookup_table"].IsNull()
+	resp.PlanValue = plannedBindField(omits, unchanged, derivable, req.StateValue)
+}
+
+// plannedBindField is what an unset bind_field will read back as after apply.
+//
+// An API that keeps what it derives out of the schema (Contact API #465)
+// reads back what was sent: the prior value while the field is unchanged,
+// since the provider sends it again, and otherwise nothing.
+//
+// An older API returns what it derives inside the schema. It derives a
+// lookup's bind_field from the attribute's navigation property, so the prior
+// value holds while the field is unchanged and is unknown once it changes. A
+// null prior on a lookup with a lookup_table is unknown too: that API can
+// derive one on any save, so a table last saved before it started deriving
+// gets a bind_field the next time anything else changes (#30).
+func plannedBindField(apiOmitsDerived, unchanged, derivable bool, prior types.String) types.String {
+	switch {
+	case apiOmitsDerived && unchanged:
+		return prior
+	case apiOmitsDerived:
+		return types.StringNull()
+	case !unchanged:
+		return types.StringUnknown()
+	case prior.IsNull() && derivable:
+		return types.StringUnknown()
+	default:
+		return prior
 	}
-	resp.PlanValue = req.StateValue
+}
+
+// apiOmitsDerivedKey is the private state key where readIntoModel records
+// whether the API answered with `derived`, i.e. keeps what it derives out of
+// the schema.
+const apiOmitsDerivedKey = "api_omits_derived"
+
+func apiOmitsDerived(ctx context.Context, private interface {
+	GetKey(context.Context, string) ([]byte, diag.Diagnostics)
+}) (bool, diag.Diagnostics) {
+	value, diags := private.GetKey(ctx, apiOmitsDerivedKey)
+	return string(value) == "true", diags
 }
 
 // ── Resource interface ──────────────────────────────────────────────────
@@ -826,7 +862,7 @@ func (r *TableResource) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 
-	r.readIntoModel(ctx, scope, routeName, &plan, &resp.Diagnostics)
+	r.readIntoModel(ctx, scope, routeName, &plan, resp.Private, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -844,7 +880,7 @@ func (r *TableResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	scope := state.Scope.ValueString()
 	routeName := state.RouteName.ValueString()
 
-	found := r.readIntoModel(ctx, scope, routeName, &state, &resp.Diagnostics)
+	found := r.readIntoModel(ctx, scope, routeName, &state, resp.Private, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -882,7 +918,7 @@ func (r *TableResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		return
 	}
 
-	r.readIntoModel(ctx, scope, routeName, &plan, &resp.Diagnostics)
+	r.readIntoModel(ctx, scope, routeName, &plan, resp.Private, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -925,8 +961,12 @@ func (r *TableResource) ImportState(ctx context.Context, req resource.ImportStat
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
 }
 
-// readIntoModel reads the current table state from the API and populates the model.
-func (r *TableResource) readIntoModel(ctx context.Context, scope, routeName string, model *TableResourceModel, diagnostics *diag.Diagnostics) (found bool) {
+// readIntoModel reads the current table state from the API and populates the
+// model, and records in private state whether the API keeps derived values
+// out of the schema (see plannedBindField).
+func (r *TableResource) readIntoModel(ctx context.Context, scope, routeName string, model *TableResourceModel, private interface {
+	SetKey(context.Context, string, []byte) diag.Diagnostics
+}, diagnostics *diag.Diagnostics) (found bool) {
 	tableResp, err := r.client.GetTable(ctx, scope, routeName)
 	if err != nil {
 		if client.IsNotFound(err) {
@@ -941,6 +981,7 @@ func (r *TableResource) readIntoModel(ctx context.Context, scope, routeName stri
 	model.ID = types.StringValue(fmt.Sprintf("%s/%s", scope, routeName))
 	model.Scope = types.StringValue(scope)
 	model.Source = types.StringValue(tableResp.Source)
+	diagnostics.Append(private.SetKey(ctx, apiOmitsDerivedKey, []byte(strconv.FormatBool(tableResp.Derived != nil)))...)
 
 	// Parse the JSON schema into the HCL model
 	schemaJSONToModel(ctx, tableResp.Schema, model, diagnostics)
