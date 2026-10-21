@@ -170,6 +170,15 @@ func (s *Server) ClearFail() {
 	s.Fail = nil
 }
 
+// SetNavProps replaces NavProps. Use it between steps, for an API that only
+// starts deriving bindField after a table was first saved; set NavProps
+// directly only before the first.
+func (s *Server) SetNavProps(navProps map[string]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.NavProps = navProps
+}
+
 // SeedTable publishes a schema directly, as if it was built outside
 // Terraform (in Table Manager, or by an older config) and is about to be
 // imported.

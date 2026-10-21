@@ -102,31 +102,43 @@ func TestBindFieldFromState(t *testing.T) {
 	}
 
 	prior := withFields(map[string]tftypes.Value{"abc_project": field("lookup", "project")})
+	derived := types.StringValue("abc_Project")
 	cases := []struct {
-		name   string
-		state  tftypes.Value
-		plan   tftypes.Value
-		config types.String
-		want   types.String
+		name       string
+		state      tftypes.Value
+		plan       tftypes.Value
+		config     types.String
+		stateValue types.String
+		want       types.String
 	}{
 		{"unchanged field", prior,
 			withFields(map[string]tftypes.Value{"abc_project": field("lookup", "project")}),
-			types.StringNull(), types.StringValue("abc_Project")},
+			types.StringNull(), derived, derived},
 		{"lookup_table changed", prior,
 			withFields(map[string]tftypes.Value{"abc_project": field("lookup", "programme")}),
-			types.StringNull(), types.StringUnknown()},
+			types.StringNull(), derived, types.StringUnknown()},
 		{"type changed", prior,
 			withFields(map[string]tftypes.Value{"abc_project": field("string", "")}),
-			types.StringNull(), types.StringUnknown()},
+			types.StringNull(), derived, types.StringUnknown()},
 		{"new field", prior,
 			withFields(map[string]tftypes.Value{"abc_other": field("lookup", "project")}),
-			types.StringNull(), types.StringUnknown()},
+			types.StringNull(), types.StringNull(), types.StringUnknown()},
 		{"create", tftypes.NewValue(objType, nil),
 			withFields(map[string]tftypes.Value{"abc_project": field("lookup", "project")}),
-			types.StringNull(), types.StringUnknown()},
+			types.StringNull(), types.StringNull(), types.StringUnknown()},
 		{"configured", prior,
 			withFields(map[string]tftypes.Value{"abc_project": field("lookup", "project")}),
-			types.StringValue("abc_Custom"), types.StringValue("abc_Custom")},
+			types.StringValue("abc_Custom"), derived, types.StringValue("abc_Custom")},
+		// #30: the API can still derive a bind_field for a lookup that has none.
+		{"lookup not derived yet", prior,
+			withFields(map[string]tftypes.Value{"abc_project": field("lookup", "project")}),
+			types.StringNull(), types.StringNull(), types.StringUnknown()},
+		{"lookup without lookup_table", withFields(map[string]tftypes.Value{"abc_project": field("lookup", "")}),
+			withFields(map[string]tftypes.Value{"abc_project": field("lookup", "")}),
+			types.StringNull(), types.StringNull(), types.StringNull()},
+		{"not a lookup", withFields(map[string]tftypes.Value{"abc_project": field("string", "")}),
+			withFields(map[string]tftypes.Value{"abc_project": field("string", "")}),
+			types.StringNull(), types.StringNull(), types.StringNull()},
 	}
 
 	for _, tc := range cases {
@@ -140,12 +152,11 @@ func TestBindFieldFromState(t *testing.T) {
 				Plan:        tfsdk.Plan{Schema: s, Raw: tc.plan},
 				State:       tfsdk.State{Schema: s, Raw: tc.state},
 				ConfigValue: tc.config,
-				StateValue:  types.StringValue("abc_Project"),
+				StateValue:  tc.stateValue,
 				PlanValue:   planValue,
 			}
 			if tc.name == "new field" {
 				req.Path = path.Root("fields").AtMapKey("abc_other").AtName("bind_field")
-				req.StateValue = types.StringNull()
 			}
 			resp := &planmodifier.StringResponse{PlanValue: req.PlanValue}
 			bindFieldFromState{}.PlanModifyString(ctx, req, resp)
