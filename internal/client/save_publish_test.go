@@ -99,7 +99,7 @@ func TestSaveAndPublishRefusesHalfDoneSaves(t *testing.T) {
 		},
 		{
 			name:     "read-back fails",
-			api:      fakeSaveAPI{save: SaveDraftResponse{}, getStatus: 502},
+			api:      fakeSaveAPI{save: SaveDraftResponse{}, getStatus: 500}, // not a status a retry would repeat
 			wantErr:  []string{`could not read back the saved draft of "case"`, "nothing was published (draft discarded)"},
 			wantReqs: []string{put, readBack, discard},
 		},
