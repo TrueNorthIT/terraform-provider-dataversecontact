@@ -82,14 +82,14 @@ func (c *Client) SaveAndPublishCustomApi(ctx context.Context, scope, routeName s
 		return nil, fmt.Errorf("failed to save custom API draft: %w", err)
 	}
 
+	discard := func() string { return discardOutcome(routeName, c.DiscardCustomApiDraft(ctx, scope, routeName)) }
+
 	publishResp, err := c.PublishCustomApis(ctx, scope, []string{routeName})
 	if err != nil {
-		_ = c.DiscardCustomApiDraft(ctx, scope, routeName)
-		return save, fmt.Errorf("failed to publish custom API (draft discarded): %w", err)
+		return save, fmt.Errorf("failed to publish custom API (%s): %w", discard(), err)
 	}
 	if err := routeNotPublished(routeName, publishResp.Published, publishResp.Errors); err != nil {
-		_ = c.DiscardCustomApiDraft(ctx, scope, routeName)
-		return save, err
+		return save, fmt.Errorf("%w (%s)", err, discard())
 	}
 
 	return save, nil

@@ -520,23 +520,38 @@ func (s *Server) customApiDefinitions(w http.ResponseWriter, scope string) {
 
 // ── The API's schema rewrites ──────────────────────────────────────────
 
-// validateAndStrip reports FIELD_NOT_FOUND for every declared column the
-// table lacks and deletes it from the schema — what the API's PUT does.
+// validateAndStrip deletes every declared column the table lacks from fields,
+// defaultSelect and lookupSearchContains, as the API's draft PUT does with
+// the columns its validation reports as FIELD_NOT_FOUND.
+//
+// The API then validates what is left and answers with THAT result, so
+// FIELD_NOT_FOUND never reaches the response: the only sign of a strip is the
+// field missing from the saved draft. lookupFields isn't stripped, so a
+// stripped column listed there comes back as LOOKUP_FIELD_UNKNOWN, which is
+// the structural check this re-validation repeats.
 func (s *Server) validateAndStrip(schema map[string]any) map[string]any {
 	logical, _ := schema["dataverseLogicalName"].(string)
 	fields, _ := schema["fields"].(map[string]any)
-	var errors []Issue
 	for _, col := range s.UnknownColumns[logical] {
 		if _, declared := fields[col]; !declared {
 			continue
 		}
-		errors = append(errors, Issue{
-			Severity: "error", Field: "fields." + col, Code: "FIELD_NOT_FOUND",
-			Message: fmt.Sprintf("Field %q does not exist on %s", col, logical),
-		})
 		delete(fields, col)
-		if sel, ok := schema["defaultSelect"].([]any); ok {
-			schema["defaultSelect"] = without(sel, col)
+		for _, key := range []string{"defaultSelect", "lookupSearchContains"} {
+			if list, ok := schema[key].([]any); ok {
+				schema[key] = without(list, col)
+			}
+		}
+	}
+	var errors []Issue
+	lookups, _ := schema["lookupFields"].([]any)
+	for _, raw := range lookups {
+		name, _ := raw.(string)
+		if _, declared := fields[name]; !declared {
+			errors = append(errors, Issue{
+				Severity: "error", Field: "lookupFields." + name, Code: "LOOKUP_FIELD_UNKNOWN",
+				Message: fmt.Sprintf("Field %q in lookupFields is not defined in fields", name),
+			})
 		}
 	}
 	return s.validation(errors)

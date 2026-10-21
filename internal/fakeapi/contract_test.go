@@ -29,7 +29,7 @@ func TestFakeMatchesContractFixtures(t *testing.T) {
 	table := map[string]any{
 		"routeName": "case", "dataverseTable": "incidents", "dataverseLogicalName": "incident",
 		"primaryKey": "incidentid", "requiredPermission": "case",
-		"defaultSelect": []any{"incidentid", "new_gone"}, "lookupFields": []any{"title"},
+		"defaultSelect": []any{"incidentid", "new_gone"}, "lookupFields": []any{"new_gone"},
 		"fields": map[string]any{
 			"incidentid": map[string]any{"type": "string", "description": "Id"},
 			"new_gone":   map[string]any{"type": "string", "description": "Not in Dataverse"},

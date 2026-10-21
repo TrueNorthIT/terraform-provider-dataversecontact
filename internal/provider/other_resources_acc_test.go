@@ -104,7 +104,7 @@ func TestAccCustomApi_publishRouteErrorFails(t *testing.T) {
 		},
 		Steps: []resource.TestStep{{
 			Config:      calendarApi(s, "Expands a calendar"),
-			ExpectError: regexp.MustCompile(`could not\s+publish\s+"expand-calendar":\s+Draft\s+blob\s+not\s+found`),
+			ExpectError: regexp.MustCompile(`error\s+publishing\s+"expand-calendar",\s+so\s+it\s+may\s+not\s+have\s+been\s+published:\s+Draft\s+blob\s+not\s+found`),
 		}},
 	})
 }

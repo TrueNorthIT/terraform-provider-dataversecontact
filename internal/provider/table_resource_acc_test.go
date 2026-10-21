@@ -408,7 +408,7 @@ func TestAccTable_publishRouteErrorFails(t *testing.T) {
 		CheckDestroy:             tablesGone(s),
 		Steps: []resource.TestStep{{
 			Config:      caseTable(s, baseFields),
-			ExpectError: regexp.MustCompile(`could not\s+publish\s+"case":\s+Draft\s+blob\s+not\s+found`),
+			ExpectError: regexp.MustCompile(`error\s+publishing\s+"case",\s+so\s+it\s+may\s+not\s+have\s+been\s+published:\s+Draft\s+blob\s+not\s+found`),
 		}},
 	})
 }
@@ -416,8 +416,9 @@ func TestAccTable_publishRouteErrorFails(t *testing.T) {
 const typoFields = baseFields + `
     new_typo = { type = "string", description = "Misspelt" }`
 
-// The API strips fields Dataverse doesn't have (FIELD_NOT_FOUND) on save.
-// The apply must name the column, and must not publish the stripped table.
+// The API strips fields Dataverse doesn't have (FIELD_NOT_FOUND) on save, and
+// answers with a validation of what is left, which doesn't mention them. The
+// apply must still name the column, and must not publish the stripped table.
 func TestAccTable_unknownColumnNamed(t *testing.T) {
 	s := fakeapi.New(t)
 	s.UnknownColumns = map[string][]string{"incident": {"new_typo"}}
@@ -433,7 +434,7 @@ func TestAccTable_unknownColumnNamed(t *testing.T) {
 		},
 		Steps: []resource.TestStep{{
 			Config:      caseTable(s, typoFields),
-			ExpectError: regexp.MustCompile(`Field not in Dataverse(?s:.*)"new_typo"\s+does\s+not\s+exist\s+on\s+incident`),
+			ExpectError: regexp.MustCompile(`Field not in Dataverse(?s:.*)"new_typo"(?s:.*)incident\s+has\s+no\s+such\s+column(?s:.*)draft\s+discarded`),
 		}},
 	})
 }

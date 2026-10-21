@@ -20,16 +20,21 @@ func addSaveError(diags *diag.Diagnostics, summary string, err error) {
 		diags.AddError(summary, err.Error())
 		return
 	}
-	for _, issue := range stripped.Fields {
+	for _, f := range stripped.Fields {
 		diags.AddAttributeError(
-			path.Root("fields").AtMapKey(stripped.FieldName(issue)),
+			path.Root("fields").AtMapKey(f.Name),
 			"Field not in Dataverse",
-			fmt.Sprintf("%s.\n\nThe API drops a field its Dataverse table doesn't have, so %q was not published "+
-				"and the draft was discarded. Check the column's logical name, or remove the field.",
-				strings.TrimSuffix(issue.Message, "."), stripped.Route),
+			fmt.Sprintf("%s.\n\nThe API drops a field its Dataverse table doesn't have, so %q was not published (%s). "+
+				"Check the column's logical name, or remove the field.",
+				strings.TrimSuffix(f.Message, "."), stripped.Route, stripped.Draft),
 		)
 	}
 }
+
+// unsurfaced are validation codes not worth a warning. A lake table gets
+// LAKE_COLUMNS_UNVERIFIED on every save: it says how lake columns are checked,
+// not that anything is wrong.
+var unsurfaced = map[string]bool{"LAKE_COLUMNS_UNVERIFIED": true}
 
 // addSaveWarnings shows what the API reported about a saved schema without
 // refusing it: validation warnings, validation errors it saved anyway, and
@@ -39,12 +44,14 @@ func addSaveWarnings(diags *diag.Diagnostics, route string, v *client.Validation
 	var lines []string
 	if v != nil {
 		for _, issue := range v.Errors {
-			if !client.IsStrippedField(issue) {
+			if !client.IsStrippedField(issue) && !unsurfaced[issue.Code] {
 				lines = append(lines, issueLine(issue, "saved anyway"))
 			}
 		}
 		for _, issue := range v.Warnings {
-			lines = append(lines, issueLine(issue, ""))
+			if !unsurfaced[issue.Code] {
+				lines = append(lines, issueLine(issue, ""))
+			}
 		}
 	}
 	for _, f := range rules {

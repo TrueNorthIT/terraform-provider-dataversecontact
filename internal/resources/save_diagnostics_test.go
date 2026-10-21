@@ -21,6 +21,7 @@ func TestAddSaveWarnings(t *testing.T) {
 		Warnings: []client.ValidationIssue{
 			{Field: "fields.title", Code: "TYPE_MISMATCH", Message: "declared as string"},
 			{Code: "METADATA_UNAVAILABLE", Message: "could not validate"},
+			{Field: "_metadata", Code: "LAKE_COLUMNS_UNVERIFIED", Message: "lake columns are checked at first use"},
 		},
 	}
 	rules := []client.ConfigFinding{{Rule: "me-only-route-name", Route: &route, Message: "answers on /team and /all only"}}
@@ -47,6 +48,9 @@ func TestAddSaveWarnings(t *testing.T) {
 	if strings.Contains(w.Detail(), "fields.gone") {
 		t.Error("a stripped field is an error, not a warning")
 	}
+	if strings.Contains(w.Detail(), "LAKE_COLUMNS_UNVERIFIED") {
+		t.Error("a lake table's LAKE_COLUMNS_UNVERIFIED comes on every save, so it isn't a warning")
+	}
 
 	var none diag.Diagnostics
 	addSaveWarnings(&none, route, &client.ValidationInfo{}, nil)
@@ -60,10 +64,11 @@ func TestAddSaveError(t *testing.T) {
 	var diags diag.Diagnostics
 	addSaveError(&diags, "Failed to create table", &client.StrippedFieldsError{
 		Route: "case",
-		Fields: []client.ValidationIssue{
-			{Field: "fields.a", Code: "FIELD_NOT_FOUND", Message: `Field "a" does not exist on incident`},
-			{Field: "fields.b", Code: "FIELD_NOT_FOUND", Message: `Field "b" does not exist on incident.`},
+		Fields: []client.StrippedField{
+			{Name: "a", Message: `Field "a" does not exist on incident`},
+			{Name: "b", Message: `Field "b" does not exist on incident.`},
 		},
+		Draft: "draft discarded",
 	})
 	if diags.ErrorsCount() != 2 {
 		t.Fatalf("want an error per field, got %v", diags)
@@ -74,7 +79,8 @@ func TestAddSaveError(t *testing.T) {
 			t.Errorf("error %d not on fields[%q]: %v", i, name, diags.Errors()[i])
 			continue
 		}
-		if !strings.HasPrefix(d.Detail(), `Field "`+name+`" does not exist on incident.`+"\n") {
+		if !strings.HasPrefix(d.Detail(), `Field "`+name+`" does not exist on incident.`+"\n") ||
+			!strings.Contains(d.Detail(), `"case" was not published (draft discarded)`) {
 			t.Errorf("detail %q", d.Detail())
 		}
 	}
