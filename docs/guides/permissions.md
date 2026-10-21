@@ -48,6 +48,15 @@ block, `create` on the same name lets callers upload into a row's folder
 `create` doesn't imply listing, so a portal that shows what was uploaded
 needs both.
 
+`invite`, `invite:team` and `invite:all` let a caller send one-time invite
+links from that tier through the API: on a table (`case = ["team",
+"write:team", "invite:team"]`), or for an upload under the documents
+permission (`casedocuments = ["team", "create:team", "invite:team"]`). The
+sender also needs what the invitee will do, at the same tier: `write` for an
+update invite, `create` otherwise. `invite` implies nothing, and nothing implies
+it. Officers sending invites from Dataverse need none of these, only the
+*Portal Invite Sender* role (see [Invite links](invite-links)).
+
 Prefer the narrowest tier that works. In particular, don't give an ownerless
 child table `["all", "write:all"]` to work around its lack of an owner — a
 reverse join lets you scope it to `["me", "write"]` (see
