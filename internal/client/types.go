@@ -49,6 +49,15 @@ type TableManagerResponse struct {
 	Source string          `json:"source"`
 	Draft  *DraftInfo      `json:"draft"`
 	Schema json.RawMessage `json:"schema"`
+	// Derived is what the API filled in on save and left out of Schema
+	// (Contact API #465). An older API answers without it and returns derived
+	// values inside Schema, as if they had been written.
+	Derived *DerivedState `json:"derived,omitempty"`
+}
+
+// DerivedState is what an admin table GET reports beside the schema.
+type DerivedState struct {
+	BindFields map[string]string `json:"bindFields"`
 }
 
 // SaveDraftResponse is the response from PUT /table-manager/{table}.
