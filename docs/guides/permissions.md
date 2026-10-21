@@ -39,6 +39,11 @@ Each `default_permissions` entry maps a route name to a list of tokens:
 - `create` — create rows (combine with a `create_default` on the table to
   bind new rows to the caller).
 
+A table's SharePoint documents are granted under their own name: the
+`permission` in its `documents` block is a key here too, like a route
+(`casedocuments = ["me"]` for `GET /me/case/{id}/documents`). Only the read
+tiers apply to it, and reading the table isn't enough on its own.
+
 Prefer the narrowest tier that works. In particular, don't give an ownerless
 child table `["all", "write:all"]` to work around its lack of an owner — a
 reverse join lets you scope it to `["me", "write"]` (see

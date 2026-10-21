@@ -80,6 +80,19 @@ resource "dataversecontact_table" "case" {
     bind_to    = "contact"
     entity_set = "contacts"
   }
+
+  # The SharePoint documents in each case's folder, listed with
+  # GET /me/case/{id}/documents. Listing needs `casedocuments`, granted in
+  # dataversecontact_permissions_sync like a route:
+  #   default_permissions = { case = ["me", "write", "create"], casedocuments = ["me"] }
+  # Reading the case isn't enough on its own. Only documents an officer has
+  # marked ShowOnPortal in the library are listed.
+  documents {
+    permission = "casedocuments"
+    columns    = { ShowOnPortal = "boolean" } # SharePoint internal name = type
+    filters    = ["ShowOnPortal eq true"]
+    # folder   = "Public"                    # serve a sub-folder instead
+  }
 }
 
 # A public catalog table: readable without authentication, no citizen owner.
