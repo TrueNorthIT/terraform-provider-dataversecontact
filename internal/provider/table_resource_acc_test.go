@@ -678,6 +678,22 @@ func TestAccTable_validateConfig(t *testing.T) {
 	})
 }
 
+// A read-only lookup needs no lookup_table: it never writes, and a
+// polymorphic one (customerid) has no single target. v1.1.0 to v1.5.0
+// refused it at plan, which broke our own portal configs (found by
+// TestAccRealConfigs).
+func TestAccTable_readOnlyLookupWithoutTable(t *testing.T) {
+	s := fakeapi.New(t)
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             tablesGone(s),
+		Steps: []resource.TestStep{{
+			Config: caseTable(s, baseFields+`
+    customerid = { type = "lookup", description = "Customer (account or contact)", read_only = true }`),
+		}},
+	})
+}
+
 // ── Saves the API only half carries out ────────────────────────────────
 // The API answers both of these with a 200. Each must fail the apply, publish
 // nothing the config didn't ask for, and leave no draft behind: the table GET

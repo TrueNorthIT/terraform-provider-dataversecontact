@@ -861,19 +861,23 @@ func (r *TableResource) ValidateConfig(ctx context.Context, req resource.Validat
 			attrs := obj.Attributes()
 			fieldType, _ := attrs["type"].(types.String)
 			lookupTable, _ := attrs["lookup_table"].(types.String)
+			readOnly, _ := attrs["read_only"].(types.Bool)
 			if fieldType.IsNull() || fieldType.IsUnknown() {
 				continue
 			}
 			switch {
 			case name == polymorphicField && fieldType.ValueString() == "lookup":
 				// Exempt — see above.
-			case fieldType.ValueString() == "lookup" && lookupTable.IsNull():
+			case fieldType.ValueString() == "lookup" && lookupTable.IsNull() && !readOnly.ValueBool():
+				// A write binds the lookup through its target's entity set, which
+				// the API finds from lookup_table. A read-only lookup never writes,
+				// and a polymorphic one such as customerid has no single target.
 				resp.Diagnostics.AddAttributeError(
 					path.Root("fields").AtMapKey(name).AtName("lookup_table"),
 					"Lookup field missing lookup_table",
-					fmt.Sprintf("Field %q has type \"lookup\" but no lookup_table. "+
+					fmt.Sprintf("Field %q is a writable lookup with no lookup_table. "+
 						"Set lookup_table to the route name of the table the lookup points at "+
-						"(e.g. \"contact\").", name),
+						"(e.g. \"contact\"), or set read_only = true if the portal never writes it.", name),
 				)
 			case fieldType.ValueString() != "lookup" && !lookupTable.IsNull() && !lookupTable.IsUnknown():
 				resp.Diagnostics.AddAttributeWarning(
