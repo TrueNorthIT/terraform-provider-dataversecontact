@@ -82,9 +82,9 @@ resource "dataversecontact_table" "case" {
   }
 
   # The SharePoint documents in each case's folder, listed with
-  # GET /me/case/{id}/documents and uploaded with POST /me/case/{id}/documents.
-  # Both need `casedocuments`, granted in dataversecontact_permissions_sync
-  # like a route: "me" lists, "create" uploads.
+  # GET /me/case/{id}/documents and uploaded through
+  # POST /me/case/{id}/documents/uploads. Both need `casedocuments`, granted in
+  # dataversecontact_permissions_sync like a route: "me" lists, "create" uploads.
   #   default_permissions = { case = ["me", "write", "create"], casedocuments = ["me", "create"] }
   # Reading the case isn't enough on its own. Only documents an officer has
   # marked ShowOnPortal in the library are listed.
@@ -98,7 +98,7 @@ resource "dataversecontact_table" "case" {
     # ShowOnPortal, so the citizen sees what they sent.
     upload {
       columns = { ShowOnPortal = "true" } # fixed: callers can't change it
-      # max_bytes  = 2097152              # default: the deployment's cap, 4 MiB
+      # max_bytes  = 5242880              # default 10 MiB, never above the deployment's cap
       # extensions = ["pdf", "jpg", "png"] # default: common documents and images
     }
   }

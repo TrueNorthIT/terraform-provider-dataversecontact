@@ -528,9 +528,10 @@ func TestValidateDocumentsUpload(t *testing.T) {
 		{name: "unknown value", d: documentsWith(columns, uploadOf(types.Int64Null(), noList,
 			types.MapValueMust(types.StringType, map[string]attr.Value{"Rank": types.StringUnknown()})))},
 		{name: "unknown upload columns", d: documentsWith(columns, uploadOf(types.Int64Null(), noList, types.MapUnknown(types.StringType)))},
-		{name: "max_bytes at the cap", d: documentsWith(columns, uploadOf(types.Int64Value(4194304), noList, types.MapNull(types.StringType)))},
-		{name: "max_bytes above the cap", d: documentsWith(columns, uploadOf(types.Int64Value(4194305), noList, types.MapNull(types.StringType))),
-			warning: "above the API's default cap"},
+		{name: "max_bytes above the route default", d: documentsWith(columns, uploadOf(types.Int64Value(20971520), noList, types.MapNull(types.StringType)))},
+		{name: "max_bytes at the cap", d: documentsWith(columns, uploadOf(types.Int64Value(26214400), noList, types.MapNull(types.StringType)))},
+		{name: "max_bytes above the cap", d: documentsWith(columns, uploadOf(types.Int64Value(26214401), noList, types.MapNull(types.StringType))),
+			warning: "above the API's default deployment cap of 26214400 bytes"},
 		{name: "unknown max_bytes", d: documentsWith(columns, uploadOf(types.Int64Unknown(), noList, types.MapNull(types.StringType)))},
 	}
 	for _, c := range cases {

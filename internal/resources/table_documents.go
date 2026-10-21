@@ -128,10 +128,10 @@ const (
 	maxDocumentColumns = 30
 	maxDocumentFilters = 10
 
-	// documentUploadCap is the API's default DOCUMENT_UPLOAD_MAX_BYTES (4 MiB).
+	// documentUploadCap is the API's default DOCUMENT_UPLOAD_MAX_BYTES (25 MiB).
 	// A route's max_bytes never lifts an upload above the deployment's cap, so
 	// a larger value only takes effect where the deployment raised it.
-	documentUploadCap = 4194304
+	documentUploadCap = 26214400
 )
 
 var (
@@ -218,19 +218,23 @@ func documentsBlock() schema.SingleNestedBlock {
 
 func documentsUploadBlock() schema.SingleNestedBlock {
 	return schema.SingleNestedBlock{
-		Description: "Lets callers upload a file into a row's folder: POST /{tier}/{route}/{id}/documents?name=<file name> " +
-			"with the file's bytes as the body. Leave the block out to allow no uploads; upload {} allows them " +
-			"with the API's defaults. Uploading needs create on the documents permission at that tier, granted in " +
+		Description: "Lets callers upload a file into a row's folder, in three steps: POST " +
+			"/{tier}/{route}/{id}/documents/uploads with the file's name, size and type returns a short-lived " +
+			"upload URL; the caller PUTs the bytes to it; POST .../documents/uploads/{uploadId}/complete files " +
+			"them in SharePoint. Leave the block out to allow no uploads; upload {} allows them with the API's " +
+			"defaults. Uploading needs create on the documents permission at that tier, granted in " +
 			"dataversecontact_permissions_sync.default_permissions (e.g. casedocuments = [\"me\", \"create\"]); " +
 			"create doesn't imply listing. The row is checked with this table's own scoping first. A file never " +
 			"overwrites another (SharePoint renames a clash), and a row with no folder yet gets one. Grant the " +
 			"API's service principal Sites.Selected with Write on the site, and its Dataverse app user Create on " +
-			"Document Location. Needs Contact API 1.35.0 or later: an older API keeps the key without an error " +
-			"but accepts no uploads.",
+			"Document Location. The upload URL is in the API's downloads storage, as for file downloads, and the " +
+			"storage account needs a CORS rule allowing PUT from the portal. Needs Contact API 1.35.0 or later: " +
+			"an older API keeps the key without an error but accepts no uploads.",
 		Attributes: map[string]schema.Attribute{
 			"max_bytes": schema.Int64Attribute{
-				Description: "Largest file accepted, in bytes. Leave it out for the deployment's cap " +
-					"(DOCUMENT_UPLOAD_MAX_BYTES, 4194304 = 4 MiB by default), which a route can lower but never raise.",
+				Description: "Largest file accepted, in bytes. Leave it out for 10485760 (10 MiB). Uploads are " +
+					"also capped by the deployment's DOCUMENT_UPLOAD_MAX_BYTES (26214400 = 25 MiB by default), " +
+					"so a larger value only applies where the deployment raised that.",
 				Optional:   true,
 				Validators: []validator.Int64{int64validator.AtLeast(1)},
 			},
@@ -410,8 +414,9 @@ func validateDocuments(d *DocumentsModel) diag.Diagnostics {
 
 // validateDocumentsUpload checks the upload block against the rest of
 // documents: each fixed column is declared in documents.columns with a type
-// its value suits. A max_bytes above the default cap is only a warning,
-// because a container deployment can raise the cap.
+// its value suits. A max_bytes above the default deployment cap is only a
+// warning, as the API's save makes it: a deployment can raise the cap, and
+// requests are capped anyway.
 func validateDocumentsUpload(d *DocumentsModel) diag.Diagnostics {
 	var diags diag.Diagnostics
 	u := d.Upload
@@ -422,9 +427,9 @@ func validateDocumentsUpload(d *DocumentsModel) diag.Diagnostics {
 
 	if !u.MaxBytes.IsNull() && !u.MaxBytes.IsUnknown() && u.MaxBytes.ValueInt64() > documentUploadCap {
 		diags.AddAttributeWarning(at.AtName("max_bytes"), "max_bytes above the default upload cap",
-			fmt.Sprintf("%d is above the API's default cap of %d bytes (4 MiB). The deployment's "+
-				"DOCUMENT_UPLOAD_MAX_BYTES still applies, so uploads stop at that cap unless the deployment "+
-				"raised it; a serverless deployment can't take requests above about 4.5 MB.",
+			fmt.Sprintf("%d is above the API's default deployment cap of %d bytes (25 MiB). Uploads are "+
+				"capped by the deployment's DOCUMENT_UPLOAD_MAX_BYTES anyway, so this only applies where the "+
+				"deployment raised it.",
 				u.MaxBytes.ValueInt64(), documentUploadCap))
 	}
 

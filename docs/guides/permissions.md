@@ -44,7 +44,7 @@ A table's SharePoint documents are granted under their own name: the
 (`casedocuments = ["me"]` for `GET /me/case/{id}/documents`). Reading the
 table isn't enough on its own. Where the `documents` block has an `upload`
 block, `create` on the same name lets callers upload into a row's folder
-(`casedocuments = ["me", "create"]` for `POST /me/case/{id}/documents`).
+(`casedocuments = ["me", "create"]` for `POST /me/case/{id}/documents/uploads`).
 `create` doesn't imply listing, so a portal that shows what was uploaded
 needs both.
 
