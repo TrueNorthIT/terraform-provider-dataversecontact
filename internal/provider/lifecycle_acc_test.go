@@ -296,6 +296,9 @@ func TestAccTable_blockEdits(t *testing.T) {
     folder     = "Public"
     columns    = { ShowOnPortal = "boolean" }
     filters    = ["ShowOnPortal eq true"]
+    upload {
+      columns = { ShowOnPortal = "true" }
+    }
   }
   business_process = { expose_as = "stage" }` + expand("fullname"),
 		`

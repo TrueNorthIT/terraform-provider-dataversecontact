@@ -41,8 +41,12 @@ Each `default_permissions` entry maps a route name to a list of tokens:
 
 A table's SharePoint documents are granted under their own name: the
 `permission` in its `documents` block is a key here too, like a route
-(`casedocuments = ["me"]` for `GET /me/case/{id}/documents`). Only the read
-tiers apply to it, and reading the table isn't enough on its own.
+(`casedocuments = ["me"]` for `GET /me/case/{id}/documents`). Reading the
+table isn't enough on its own. Where the `documents` block has an `upload`
+block, `create` on the same name lets callers upload into a row's folder
+(`casedocuments = ["me", "create"]` for `POST /me/case/{id}/documents/uploads`).
+`create` doesn't imply listing, so a portal that shows what was uploaded
+needs both.
 
 Prefer the narrowest tier that works. In particular, don't give an ownerless
 child table `["all", "write:all"]` to work around its lack of an owner — a

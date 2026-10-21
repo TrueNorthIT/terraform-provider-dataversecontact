@@ -97,9 +97,10 @@ resource "dataversecontact_table" "case" {
   }
 
   # The SharePoint documents in each case's folder, listed with
-  # GET /me/case/{id}/documents. Listing needs `casedocuments`, granted in
-  # dataversecontact_permissions_sync like a route:
-  #   default_permissions = { case = ["me", "write", "create"], casedocuments = ["me"] }
+  # GET /me/case/{id}/documents and uploaded through
+  # POST /me/case/{id}/documents/uploads. Both need `casedocuments`, granted in
+  # dataversecontact_permissions_sync like a route: "me" lists, "create" uploads.
+  #   default_permissions = { case = ["me", "write", "create"], casedocuments = ["me", "create"] }
   # Reading the case isn't enough on its own. Only documents an officer has
   # marked ShowOnPortal in the library are listed.
   documents {
@@ -107,6 +108,14 @@ resource "dataversecontact_table" "case" {
     columns    = { ShowOnPortal = "boolean" } # SharePoint internal name = type
     filters    = ["ShowOnPortal eq true"]
     # folder   = "Public"                    # serve a sub-folder instead
+
+    # Leave upload out to allow no uploads. Every uploaded file is marked
+    # ShowOnPortal, so the citizen sees what they sent.
+    upload {
+      columns = { ShowOnPortal = "true" } # fixed: callers can't change it
+      # max_bytes  = 5242880              # default 10 MiB, never above the deployment's cap
+      # extensions = ["pdf", "jpg", "png"] # default: common documents and images
+    }
   }
 }
 
@@ -297,7 +306,7 @@ resource "dataversecontact_table" "emails" {
 - `create_default` (Block List) Lookup fields automatically bound when creating a record. (see [below for nested schema](#nestedblock--create_default))
 - `dataverse_logical_name` (String) The Dataverse entity logical name (e.g. "incident"). If omitted, derived by singularizing dataverse_table.
 - `description` (String) Human-readable description of this table.
-- `documents` (Block, Optional) SharePoint documents in each row's folder. Dataverse's SharePoint integration keeps a folder per row; with this, GET /{tier}/{route}/{id}/documents lists what is in it (one folder level, read through Microsoft Graph). The row is checked with this table's own scoping first. Listing needs the documents permission at that tier, not this table's: grant it in dataversecontact_permissions_sync.default_permissions under the same name (e.g. casedocuments = ["me"]). Each document carries id, name, folder, isFolder, mimeType, size, createdon and modifiedon, plus the columns declared here. Switch document management on for the table in Dataverse, and grant the API's service principal Sites.Selected with Read on the site. Needs Contact API 1.34.0 or later: an older API keeps the key without an error but serves no documents. (see [below for nested schema](#nestedblock--documents))
+- `documents` (Block, Optional) SharePoint documents in each row's folder. Dataverse's SharePoint integration keeps a folder per row; with this, GET /{tier}/{route}/{id}/documents lists what is in it (one folder level, read through Microsoft Graph). The row is checked with this table's own scoping first. Listing needs the documents permission at that tier, not this table's: grant it in dataversecontact_permissions_sync.default_permissions under the same name (e.g. casedocuments = ["me"]). Each document carries id, name, folder, isFolder, mimeType, size, createdon and modifiedon, plus the columns declared here. Switch document management on for the table in Dataverse, and grant the API's service principal Sites.Selected with Read on the site. Add an upload block to let callers upload files too. Needs Contact API 1.34.0 or later: an older API keeps the key without an error but serves no documents. (see [below for nested schema](#nestedblock--documents))
 - `expand` (Block List) Expandable lookup fields — one level deep into related tables. (see [below for nested schema](#nestedblock--expand))
 - `fetch_xml` (String) FetchXML template for custom list queries.
 - `files` (Attributes) Downloadable files on this table's rows (a note's attachment, an email's attachments). Callers list them with GET /{tier}/{route}/{id}/files and get a short-lived download link with POST .../files/{fileId}/link; the content is never returned inline. Leave out table, primary_key and parent_column when the row is the file; set all three when the files are rows of a child table. A file on the row itself drops its content column from the table's fields. Needs Contact API 1.31.0 or later: an older API drops this key without an error. (see [below for nested schema](#nestedatt--files))
@@ -403,7 +412,18 @@ Optional:
 - `columns` (Map of String) SharePoint library columns to return and allow filtering on: internal name (e.g. "ShowOnPortal", "Doc_x0020_Type") to type, one of "string", "number", "datetime" or "boolean". At most 30.
 - `filters` (List of String) Restrictions applied to every listing, in the API's filter syntax: one "field operator value" per entry (e.g. "ShowOnPortal eq true"), all ANDed, naming only document fields and declared columns. Not OData: no and/or, no functions. A caller's own filters narrow them and never widen them. At most 10.
 - `folder` (String) Sub-folder of each row's folder to serve instead (e.g. "Public" or "Public/2026"). Leave it out to serve the row's folder itself.
-- `permission` (String) Required in the block. Permission subject that lists the documents (e.g. "casedocuments"): casedocuments, casedocuments:team and casedocuments:all per tier. Only read grants under this name apply.
+- `permission` (String) Required in the block. Permission subject that lists the documents (e.g. "casedocuments"): casedocuments, casedocuments:team and casedocuments:all per tier. Its read grants list the documents; with an upload block, its create grants (casedocuments:create, :create:team, :create:all) upload them.
+- `upload` (Block, Optional) Lets callers upload a file into a row's folder, in three steps: POST /{tier}/{route}/{id}/documents/uploads with the file's name, size and type returns a short-lived upload URL; the caller PUTs the bytes to it; POST .../documents/uploads/{uploadId}/complete files them in SharePoint. Leave the block out to allow no uploads; upload {} allows them with the API's defaults. Uploading needs create on the documents permission at that tier, granted in dataversecontact_permissions_sync.default_permissions (e.g. casedocuments = ["me", "create"]); create doesn't imply listing. The row is checked with this table's own scoping first. A file never overwrites another (SharePoint renames a clash), and a row with no folder yet gets one. Grant the API's service principal Sites.Selected with Write on the site, and its Dataverse app user Create on Document Location. The upload URL is in the API's downloads storage, as for file downloads, and the storage account needs a CORS rule allowing PUT from the portal. Needs Contact API 1.35.0 or later: an older API keeps the key without an error but accepts no uploads. (see [below for nested schema](#nestedblock--documents--upload))
+
+<a id="nestedblock--documents--upload"></a>
+### Nested Schema for `documents.upload`
+
+Optional:
+
+- `columns` (Map of String) SharePoint column values set on every uploaded file, e.g. { ShowOnPortal = "true" } so an upload passes filters = ["ShowOnPortal eq true"]. Each column must be declared in documents.columns, with its value written as a string that suits the declared type: "true" or "false" for boolean, a number such as "4" for number; the provider sends each as its type. Callers can't set or override them, and if they can't be set the upload is undone.
+- `extensions` (List of String) File extensions accepted, lower case without the dot (e.g. ["pdf", "png", "jpg"]), matched case-insensitively. Leave it out for the API's default list: pdf, png, jpg, jpeg, gif, webp, heic, txt, rtf, doc, docx, xls, xlsx, csv, odt, ods. Executable types (exe, bat, cmd, com, js, msi, ps1, scr, vbs, sh, dll) are never accepted.
+- `max_bytes` (Number) Largest file accepted, in bytes. Leave it out for 10485760 (10 MiB). Uploads are also capped by the deployment's DOCUMENT_UPLOAD_MAX_BYTES (26214400 = 25 MiB by default), so a larger value only applies where the deployment raised that.
+
 
 
 <a id="nestedblock--expand"></a>

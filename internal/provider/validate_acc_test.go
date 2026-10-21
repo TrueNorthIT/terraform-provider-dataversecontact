@@ -32,8 +32,16 @@ func TestAccTable_validateConfigWarnings(t *testing.T) {
     read_only           = false
     exclude_targets     = ["sb_internal"]
     business_process    = {}
+  }
+
+  documents {
+    permission = "casedocuments"
+    upload {
+      max_bytes = 52428800 # above the default deployment cap: a deployment may raise it
+    }
   }`),
 			ConfigStateChecks: []statecheck.StateCheck{
+				statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("documents").AtMapKey("upload").AtMapKey("max_bytes"), knownvalue.Int64Exact(52428800)),
 				statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("business_process").AtMapKey("expose_as"), knownvalue.StringExact("title")),
 				statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("polymorphic_lookup").AtMapKey("read_only"), knownvalue.Bool(false)),
 				statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("fields").AtMapKey("progress").AtMapKey("lookup_table"), knownvalue.StringExact("ignored")),
