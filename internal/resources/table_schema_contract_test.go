@@ -17,7 +17,7 @@ import (
 // way in and then sent back without it — silently unsetting it on the next
 // apply.
 func TestContractTableSchemaRoundTrip(t *testing.T) {
-	for _, fixture := range []string{"get-table-published", "get-table-published-case", "get-table-published-emails"} {
+	for _, fixture := range []string{"get-table-published", "get-table-published-case", "get-table-published-emails", "get-table-published-case-documents"} {
 		t.Run(fixture, func(t *testing.T) { roundTrip(t, fixture) })
 	}
 }

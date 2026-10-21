@@ -95,6 +95,19 @@ resource "dataversecontact_table" "case" {
     bind_to    = "contact"
     entity_set = "contacts"
   }
+
+  # The SharePoint documents in each case's folder, listed with
+  # GET /me/case/{id}/documents. Listing needs `casedocuments`, granted in
+  # dataversecontact_permissions_sync like a route:
+  #   default_permissions = { case = ["me", "write", "create"], casedocuments = ["me"] }
+  # Reading the case isn't enough on its own. Only documents an officer has
+  # marked ShowOnPortal in the library are listed.
+  documents {
+    permission = "casedocuments"
+    columns    = { ShowOnPortal = "boolean" } # SharePoint internal name = type
+    filters    = ["ShowOnPortal eq true"]
+    # folder   = "Public"                    # serve a sub-folder instead
+  }
 }
 
 # A public catalog table: readable without authentication, no citizen owner.
@@ -284,6 +297,7 @@ resource "dataversecontact_table" "emails" {
 - `create_default` (Block List) Lookup fields automatically bound when creating a record. (see [below for nested schema](#nestedblock--create_default))
 - `dataverse_logical_name` (String) The Dataverse entity logical name (e.g. "incident"). If omitted, derived by singularizing dataverse_table.
 - `description` (String) Human-readable description of this table.
+- `documents` (Block, Optional) SharePoint documents in each row's folder. Dataverse's SharePoint integration keeps a folder per row; with this, GET /{tier}/{route}/{id}/documents lists what is in it (one folder level, read through Microsoft Graph). The row is checked with this table's own scoping first. Listing needs the documents permission at that tier, not this table's: grant it in dataversecontact_permissions_sync.default_permissions under the same name (e.g. casedocuments = ["me"]). Each document carries id, name, folder, isFolder, mimeType, size, createdon and modifiedon, plus the columns declared here. Switch document management on for the table in Dataverse, and grant the API's service principal Sites.Selected with Read on the site. Needs Contact API 1.34.0 or later: an older API keeps the key without an error but serves no documents. (see [below for nested schema](#nestedblock--documents))
 - `expand` (Block List) Expandable lookup fields — one level deep into related tables. (see [below for nested schema](#nestedblock--expand))
 - `fetch_xml` (String) FetchXML template for custom list queries.
 - `files` (Attributes) Downloadable files on this table's rows (a note's attachment, an email's attachments). Callers list them with GET /{tier}/{route}/{id}/files and get a short-lived download link with POST .../files/{fileId}/link; the content is never returned inline. Leave out table, primary_key and parent_column when the row is the file; set all three when the files are rows of a child table. A file on the row itself drops its content column from the table's fields. Needs Contact API 1.31.0 or later: an older API drops this key without an error. (see [below for nested schema](#nestedatt--files))
@@ -379,6 +393,17 @@ Required:
 - `bind_to` (String) What to bind it to: "contact" or "account".
 - `entity_set` (String) The Dataverse entity set for the @odata.bind URL.
 - `field` (String) The navigation property / lookup field name.
+
+
+<a id="nestedblock--documents"></a>
+### Nested Schema for `documents`
+
+Optional:
+
+- `columns` (Map of String) SharePoint library columns to return and allow filtering on: internal name (e.g. "ShowOnPortal", "Doc_x0020_Type") to type, one of "string", "number", "datetime" or "boolean". At most 30.
+- `filters` (List of String) Restrictions applied to every listing, in the API's filter syntax: one "field operator value" per entry (e.g. "ShowOnPortal eq true"), all ANDed, naming only document fields and declared columns. Not OData: no and/or, no functions. A caller's own filters narrow them and never widen them. At most 10.
+- `folder` (String) Sub-folder of each row's folder to serve instead (e.g. "Public" or "Public/2026"). Leave it out to serve the row's folder itself.
+- `permission` (String) Required in the block. Permission subject that lists the documents (e.g. "casedocuments"): casedocuments, casedocuments:team and casedocuments:all per tier. Only read grants under this name apply.
 
 
 <a id="nestedblock--expand"></a>

@@ -35,6 +35,7 @@ type SchemaHintJSON struct {
 	PolymorphicLookup         *PolymorphicLookupJSON   `json:"polymorphicLookup,omitempty"`
 	BusinessProcess           *BusinessProcessJSON     `json:"businessProcess,omitempty"`
 	Files                     *FilesJSON               `json:"files,omitempty"`
+	Documents                 *DocumentsJSON           `json:"documents,omitempty"`
 	Expands                   []ExpandJSON             `json:"expands,omitempty"`
 	PublicChoices             *bool                    `json:"publicChoices,omitempty"`
 	PublicRead                *bool                    `json:"publicRead,omitempty"`
@@ -226,6 +227,9 @@ func modelToSchemaJSON(ctx context.Context, model *TableResourceModel, diags *di
 	// Downloadable files. Nested attribute, so nil means unset.
 	hint.Files = filesModelToJSON(model.Files)
 
+	// SharePoint documents. No block, no key.
+	hint.Documents = documentsModelToJSON(ctx, model.Documents, diags)
+
 	// Expands
 	hint.Expands = expandsModelToJSON(ctx, model.Expand, diags)
 
@@ -326,6 +330,10 @@ func schemaJSONToModel(ctx context.Context, raw json.RawMessage, model *TableRes
 
 	// Downloadable files
 	model.Files = filesJSONToModel(hint.Files)
+
+	// SharePoint documents. Published hints spell an absent key as null, which
+	// decodes to nil like a missing one.
+	model.Documents = documentsJSONToModel(hint.Documents, model.Documents)
 
 	// Parent table
 	if hint.ParentTable != nil {

@@ -568,6 +568,13 @@ func TestAccTable_everyAttribute(t *testing.T) {
     navigation_property = "customerid_account"
   }
 
+  documents {
+    permission = "casedocuments"
+    folder     = "Public"
+    columns    = { ShowOnPortal = "boolean", DocType = "string" }
+    filters    = ["ShowOnPortal eq true", "name endswith .pdf"]
+  }
+
   expand {
     lookup_field  = "customerid"
     related_table = "contacts"
@@ -673,6 +680,203 @@ func TestAccTable_validateConfig(t *testing.T) {
 				Config: caseTable(s, baseFields, `
   files = { content = "Document Body", file_name = "filename", mime_type = "mimetype", size = "filesize" }`),
 				ExpectError: regexp.MustCompile(`must be a Dataverse logical name`),
+			},
+			// documents: what the API's build would refuse, and drop the table for.
+			{
+				Config:      caseTable(s, baseFields, `  documents { folder = "Public" }`),
+				ExpectError: regexp.MustCompile(`Incomplete\s+documents\s+block`),
+			},
+			{
+				Config:      caseTable(s, baseFields, `  documents { permission = "Case Documents" }`),
+				ExpectError: regexp.MustCompile(`must\s+be\s+a\s+permission\s+name`),
+			},
+			{
+				Config: caseTable(s, baseFields, `
+  documents {
+    permission = "casedocuments"
+    folder     = "../Private"
+  }`),
+				ExpectError: regexp.MustCompile(`not\s+a\s+folder\s+path\s+below\s+the\s+row's\s+folder`),
+			},
+			{
+				Config: caseTable(s, baseFields, `
+  documents {
+    permission = "casedocuments"
+    folder     = ""
+  }`),
+				ExpectError: regexp.MustCompile(`leave\s+folder\s+out`),
+			},
+			{
+				Config: caseTable(s, baseFields, `
+  documents {
+    permission = "casedocuments"
+    columns    = { "Show On Portal" = "boolean" }
+  }`),
+				ExpectError: regexp.MustCompile(`must\s+be\s+a\s+SharePoint\s+column\s+internal\s+name`),
+			},
+			{
+				Config: caseTable(s, baseFields, `
+  documents {
+    permission = "casedocuments"
+    columns    = { name = "string" }
+  }`),
+				ExpectError: regexp.MustCompile(`(?s)none of.*name`),
+			},
+			{
+				Config: caseTable(s, baseFields, `
+  documents {
+    permission = "casedocuments"
+    columns    = { ShowOnPortal = "bool" }
+  }`),
+				ExpectError: regexp.MustCompile(`value\s+must\s+be\s+one\s+of`),
+			},
+			{
+				Config: caseTable(s, baseFields, `
+  documents {
+    permission = "casedocuments"
+    filters    = ["ShowOnPortal eq true"]
+  }`),
+				ExpectError: regexp.MustCompile(`\"ShowOnPortal\"\s+isn't\s+a\s+document\s+field`),
+			},
+			{
+				Config: caseTable(s, baseFields, `
+  documents {
+    permission = "casedocuments"
+    columns    = { ShowOnPortal = "boolean" }
+    filters    = ["ShowOnPortal gt true"]
+  }`),
+				ExpectError: regexp.MustCompile(`'gt'\s+doesn't\s+apply\s+to\s+boolean\s+field`),
+			},
+			{
+				Config: caseTable(s, baseFields, `
+  documents {
+    permission = "casedocuments"
+    filters    = []
+  }`),
+				ExpectError: regexp.MustCompile(`at\s+least\s+1`),
+			},
+		},
+	})
+}
+
+// documents over its life. A table without it publishes no key and plans
+// clean even when the API spells the absence as null; each optional
+// attribute is sent only when set; a list-form columns written outside
+// Terraform reads back without a diff when it names the configured columns;
+// and removing the block removes the key.
+func TestAccTable_documents(t *testing.T) {
+	s := fakeapi.New(t)
+	documents := func(body string) string {
+		return fmt.Sprintf("\n  documents {\n%s\n  }", body)
+	}
+	full := documents(`    permission = "casedocuments"
+    folder     = "Public"
+    columns    = { ShowOnPortal = "boolean" }
+    filters    = ["ShowOnPortal eq true"]`)
+	permissionOnly := documents(`    permission = "casedocuments"`)
+	typed := documents(`    permission = "casedocuments"
+    columns    = { ShowOnPortal = "boolean" }`)
+
+	published := func(want map[string]any) resource.TestCheckFunc {
+		return func(*terraform.State) error {
+			got, ok := s.Table("default", "case")["documents"]
+			if want == nil {
+				if ok {
+					return fmt.Errorf("documents published without a block: %v", got)
+				}
+				return nil
+			}
+			if fmt.Sprint(got) != fmt.Sprint(want) {
+				return fmt.Errorf("published documents = %v, want %v", got, want)
+			}
+			return nil
+		}
+	}
+	setColumns := func(columns any) func() {
+		return func() {
+			s.EditTable("default", "case", func(m map[string]any) {
+				m["documents"].(map[string]any)["columns"] = columns
+			})
+		}
+	}
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             tablesGone(s),
+		Steps: []resource.TestStep{
+			{
+				Config: caseTable(s, baseFields),
+				Check:  published(nil),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("documents"), knownvalue.Null()),
+				},
+			},
+			{
+				// The published hint spells "no documents" as null.
+				PreConfig: func() { s.EditTable("default", "case", func(m map[string]any) { m["documents"] = nil }) },
+				Config:    caseTable(s, baseFields),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
+			{
+				Config: caseTable(s, baseFields, full),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(caseAddress, plancheck.ResourceActionUpdate)},
+				},
+				Check: published(map[string]any{
+					"permission": "casedocuments",
+					"folder":     "Public",
+					"columns":    map[string]any{"ShowOnPortal": "boolean"},
+					"filters":    []any{"ShowOnPortal eq true"},
+				}),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("documents").AtMapKey("columns"),
+						knownvalue.MapExact(map[string]knownvalue.Check{"ShowOnPortal": knownvalue.StringExact("boolean")})),
+				},
+			},
+			{
+				Config: caseTable(s, baseFields, permissionOnly),
+				Check:  published(map[string]any{"permission": "casedocuments"}),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("documents").AtMapKey("folder"), knownvalue.Null()),
+					statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("documents").AtMapKey("columns"), knownvalue.Null()),
+					statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("documents").AtMapKey("filters"), knownvalue.Null()),
+				},
+			},
+			{Config: caseTable(s, baseFields, typed)},
+			{
+				// The same columns as a list, as the Table Manager may save them.
+				PreConfig: setColumns([]any{"ShowOnPortal"}),
+				Config:    caseTable(s, baseFields, typed),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
+			{
+				// A list naming other columns is drift: put the config back.
+				PreConfig: setColumns([]any{"DocType"}),
+				Config:    caseTable(s, baseFields, typed),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(caseAddress, plancheck.ResourceActionUpdate)},
+				},
+				Check: published(map[string]any{
+					"permission": "casedocuments",
+					"columns":    map[string]any{"ShowOnPortal": "boolean"},
+				}),
+			},
+			{
+				ResourceName:      caseAddress,
+				ImportState:       true,
+				ImportStateId:     "default/case",
+				ImportStateVerify: true,
+			},
+			{
+				Config: caseTable(s, baseFields),
+				Check:  published(nil),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("documents"), knownvalue.Null()),
+				},
 			},
 		},
 	})

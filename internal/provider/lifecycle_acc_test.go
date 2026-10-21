@@ -291,6 +291,12 @@ func TestAccTable_blockEdits(t *testing.T) {
     field               = "regardingobjectid"
     required_permission = "servicerecord"
   }
+  documents {
+    permission = "casedocuments"
+    folder     = "Public"
+    columns    = { ShowOnPortal = "boolean" }
+    filters    = ["ShowOnPortal eq true"]
+  }
   business_process = { expose_as = "stage" }` + expand("fullname"),
 		`
   team_join_step {
@@ -303,6 +309,9 @@ func TestAccTable_blockEdits(t *testing.T) {
     bind_to    = "account"
     entity_set = "accounts"
   }
+  documents {
+    permission = "casefiles"
+  }
   business_process = {}` + expand("emailaddress1"),
 		``,
 	}
@@ -314,7 +323,7 @@ func TestAccTable_blockEdits(t *testing.T) {
 		Config: caseTable(s, fields),
 		Check: func(*terraform.State) error {
 			m := s.Table("default", "case")
-			for _, key := range []string{"teamJoinPath", "createDefaults", "parentTable", "polymorphicLookup", "businessProcess", "expands", "alternateContactJoinPaths"} {
+			for _, key := range []string{"teamJoinPath", "createDefaults", "parentTable", "polymorphicLookup", "documents", "businessProcess", "expands", "alternateContactJoinPaths"} {
 				if _, ok := m[key]; ok {
 					return fmt.Errorf("%s still published after its block was removed", key)
 				}

@@ -80,6 +80,7 @@ type TableResourceModel struct {
 	CreateDefault            []CreateDefaultModel            `tfsdk:"create_default"`
 	ParentTable              *ParentTableModel               `tfsdk:"parent_table"`
 	PolymorphicLookup        *PolymorphicLookupModel         `tfsdk:"polymorphic_lookup"`
+	Documents                *DocumentsModel                 `tfsdk:"documents"`
 	Expand                   []ExpandModel                   `tfsdk:"expand"`
 
 	// Computed
@@ -785,6 +786,7 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 					"business_process": businessProcessAttribute("each target's"),
 				},
 			},
+			"documents": documentsBlock(),
 			"expand": schema.ListNestedBlock{
 				Description: "Expandable lookup fields — one level deep into related tables.",
 				NestedObject: schema.NestedBlockObject{
@@ -831,8 +833,9 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 
 // ValidateConfig catches cross-field mistakes the per-attribute validators
 // can't: a lookup field without its target table, and a half-filled
-// parent_table block (whose attributes must stay Optional because a
-// SingleNestedBlock's Required attributes error even when the block is omitted).
+// parent_table or documents block (whose attributes must stay Optional because
+// a SingleNestedBlock's Required attributes error even when the block is
+// omitted), and documents filters naming fields the block doesn't have.
 func (r *TableResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var config TableResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
@@ -944,6 +947,8 @@ func (r *TableResource) ValidateConfig(ctx context.Context, req resource.Validat
 			)
 		}
 	}
+
+	resp.Diagnostics.Append(validateDocuments(config.Documents)...)
 }
 
 func (r *TableResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
