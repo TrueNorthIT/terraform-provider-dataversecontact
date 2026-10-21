@@ -9,6 +9,7 @@
         "create"
       ]
     },
-    "allowSelfRegister": false
+    "allowSelfRegister": false,
+    "inviteUrl": "https://portal.example.gov.uk/invite#token={token}"
   }
 }

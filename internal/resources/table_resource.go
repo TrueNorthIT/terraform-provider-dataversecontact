@@ -67,6 +67,7 @@ type TableResourceModel struct {
 	PublicChoices        types.Bool            `tfsdk:"public_choices"`
 	PublicRead           types.Bool            `tfsdk:"public_read"`
 	PublicCreate         types.Bool            `tfsdk:"public_create"`
+	Invites              types.Set             `tfsdk:"invites"`
 	BusinessProcess      *BusinessProcessModel `tfsdk:"business_process"`
 	Files                *FilesModel           `tfsdk:"files"`
 
@@ -634,6 +635,7 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
 			},
+			"invites": invitesAttribute(),
 
 			// Fields — map keyed by Dataverse logical name
 			"fields": schema.MapNestedAttribute{
@@ -835,7 +837,8 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 // can't: a lookup field without its target table, and a half-filled
 // parent_table or documents block (whose attributes must stay Optional because
 // a SingleNestedBlock's Required attributes error even when the block is
-// omitted), and documents filters naming fields the block doesn't have.
+// omitted), documents filters naming fields the block doesn't have, and
+// "create" invites on a contact table.
 func (r *TableResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var config TableResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
@@ -949,6 +952,7 @@ func (r *TableResource) ValidateConfig(ctx context.Context, req resource.Validat
 	}
 
 	resp.Diagnostics.Append(validateDocuments(config.Documents)...)
+	resp.Diagnostics.Append(validateInvites(&config)...)
 }
 
 func (r *TableResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {

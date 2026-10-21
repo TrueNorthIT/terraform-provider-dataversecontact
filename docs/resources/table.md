@@ -96,6 +96,14 @@ resource "dataversecontact_table" "case" {
     entity_set = "contacts"
   }
 
+  # One-time invite links: whoever holds one can do one thing, once, with no
+  # account. "create" logs a new case for the contact the invite was sent for
+  # (the create_default above binds it); "update" changes only the fields the
+  # invite names. Adding a note is invites on the child route (casenotes,
+  # below); uploading a document is documents.upload.invites. Set where links
+  # open with invite_url on dataversecontact_permissions_sync.
+  invites = ["create", "update"]
+
   # The SharePoint documents in each case's folder, listed with
   # GET /me/case/{id}/documents and uploaded through
   # POST /me/case/{id}/documents/uploads. Both need `casedocuments`, granted in
@@ -113,9 +121,55 @@ resource "dataversecontact_table" "case" {
     # ShowOnPortal, so the citizen sees what they sent.
     upload {
       columns = { ShowOnPortal = "true" } # fixed: callers can't change it
+      invites = true                      # a one-time invite link may upload one file
       # max_bytes  = 5242880              # default 10 MiB, never above the deployment's cap
       # extensions = ["pdf", "jpg", "png"] # default: common documents and images
     }
+  }
+}
+
+# A child of case: the notes on it. invites = ["create"] lets an invite sent on
+# a case add one note to that case ("please add the photos you mentioned").
+# The invitee sets only the writable fields that aren't lookups (subject and
+# notetext): the note always goes on the invite's case, through the field whose
+# bind_field is parent_table's navigation_property.
+resource "dataversecontact_table" "casenotes" {
+  scope               = "default"
+  route_name          = "casenotes"
+  description         = "Notes on the citizen's cases"
+  dataverse_table     = "annotations"
+  primary_key         = "annotationid"
+  required_permission = "casenotes"
+  filters             = ["objecttypecode eq 'incident'"]
+
+  default_select = ["annotationid", "subject", "notetext", "createdon"]
+  lookup_fields  = ["subject"]
+
+  invites = ["create"]
+
+  parent_table {
+    table               = "case"
+    navigation_property = "objectid_incident"
+  }
+
+  # me: note -> its case -> the case's citizen.
+  contact_join_step {
+    table = "incidents"
+    from  = "objectid_incident"
+    key   = "incidentid"
+  }
+  contact_join_step {
+    table = "contacts"
+    from  = "customerid_contact"
+    key   = "contactid"
+  }
+
+  fields = {
+    annotationid = { type = "string", description = "Note id.", read_only = true }
+    subject      = { type = "string", description = "Note title." }
+    notetext     = { type = "string", description = "Note text." }
+    objectid     = { type = "lookup", description = "The case.", lookup_table = "case", bind_field = "objectid_incident" }
+    createdon    = { type = "datetime", description = "Added on.", read_only = true }
   }
 }
 
@@ -312,6 +366,7 @@ resource "dataversecontact_table" "emails" {
 - `files` (Attributes) Downloadable files on this table's rows (a note's attachment, an email's attachments). Callers list them with GET /{tier}/{route}/{id}/files and get a short-lived download link with POST .../files/{fileId}/link; the content is never returned inline. Leave out table, primary_key and parent_column when the row is the file; set all three when the files are rows of a child table. A file on the row itself drops its content column from the table's fields. Needs Contact API 1.31.0 or later: an older API drops this key without an error. (see [below for nested schema](#nestedatt--files))
 - `filters` (List of String) Always-on filter expressions applied to every query. Defaults to ["statecode eq 0"].
 - `icon` (String) Icon filename (e.g. "incident.svg").
+- `invites` (Set of String) What one-time invite links may do on this table's rows: "create" and/or "update". An invite link lets whoever holds it, with no account, do one thing once. "update" changes one row, and only the fields the invite names (this table's writable fields, never a lookup). "create" on a child table (one with parent_table) adds one row under the parent row the invite was sent for, e.g. a note on a case; on any other table it logs one new row, which a create_default binding the contact ties to the contact the invite was sent for. A contact table can't take "create". Leave it out for no invites. An invite to upload a document is documents.upload.invites. Sending one through the API needs invite on this table's permission at the sender's tier (e.g. case = ["team", "write:team", "invite:team"] in dataversecontact_permissions_sync.default_permissions) plus write for an update or create otherwise; sending from Dataverse needs the Portal Invite Sender role instead. Set the portal page links open on with invite_url there. Needs Contact API 1.36.0 or later: an older API keeps the key without an error but makes no invites.
 - `lookup_search_contains` (List of String) Lookup fields that use 'contains' instead of 'startswith'.
 - `parent_table` (Block, Optional) Parent table relationship for child record tables. (see [below for nested schema](#nestedblock--parent_table))
 - `permission_group` (String) Permission group name for shared permissions.
@@ -413,7 +468,7 @@ Optional:
 - `filters` (List of String) Restrictions applied to every listing, in the API's filter syntax: one "field operator value" per entry (e.g. "ShowOnPortal eq true"), all ANDed, naming only document fields and declared columns. Not OData: no and/or, no functions. A caller's own filters narrow them and never widen them. At most 10.
 - `folder` (String) Sub-folder of each row's folder to serve instead (e.g. "Public" or "Public/2026"). Leave it out to serve the row's folder itself.
 - `permission` (String) Required in the block. Permission subject that lists the documents (e.g. "casedocuments"): casedocuments, casedocuments:team and casedocuments:all per tier. Its read grants list the documents; with an upload block, its create grants (casedocuments:create, :create:team, :create:all) upload them.
-- `upload` (Block, Optional) Lets callers upload a file into a row's folder, in three steps: POST /{tier}/{route}/{id}/documents/uploads with the file's name, size and type returns a short-lived upload URL; the caller PUTs the bytes to it; POST .../documents/uploads/{uploadId}/complete files them in SharePoint. Leave the block out to allow no uploads; upload {} allows them with the API's defaults. Uploading needs create on the documents permission at that tier, granted in dataversecontact_permissions_sync.default_permissions (e.g. casedocuments = ["me", "create"]); create doesn't imply listing. The row is checked with this table's own scoping first. A file never overwrites another (SharePoint renames a clash), and a row with no folder yet gets one. Grant the API's service principal Sites.Selected with Write on the site, and its Dataverse app user Create on Document Location. The upload URL is in the API's downloads storage, as for file downloads, and the storage account needs a CORS rule allowing PUT from the portal. Needs Contact API 1.35.0 or later: an older API keeps the key without an error but accepts no uploads. (see [below for nested schema](#nestedblock--documents--upload))
+- `upload` (Block, Optional) Lets callers upload a file into a row's folder, in three steps: POST /{tier}/{route}/{id}/documents/uploads with the file's name, size and type returns a short-lived upload URL; the caller PUTs the bytes to it; POST .../documents/uploads/{uploadId}/complete files them in SharePoint. Leave the block out to allow no uploads; upload {} allows them with the API's defaults. Uploading needs create on the documents permission at that tier, granted in dataversecontact_permissions_sync.default_permissions (e.g. casedocuments = ["me", "create"]); create doesn't imply listing. The row is checked with this table's own scoping first. A file never overwrites another (SharePoint renames a clash), and a row with no folder yet gets one. Grant the API's service principal Sites.Selected with Write on the site, and its Dataverse app user Create on Document Location. The upload URL is in the API's downloads storage, as for file downloads, and the storage account needs a CORS rule allowing PUT from the portal. Set invites = true to let a one-time invite link upload one file too. Needs Contact API 1.35.0 or later: an older API keeps the key without an error but accepts no uploads. (see [below for nested schema](#nestedblock--documents--upload))
 
 <a id="nestedblock--documents--upload"></a>
 ### Nested Schema for `documents.upload`
@@ -422,6 +477,7 @@ Optional:
 
 - `columns` (Map of String) SharePoint column values set on every uploaded file, e.g. { ShowOnPortal = "true" } so an upload passes filters = ["ShowOnPortal eq true"]. Each column must be declared in documents.columns, with its value written as a string that suits the declared type: "true" or "false" for boolean, a number such as "4" for number; the provider sends each as its type. Callers can't set or override them, and if they can't be set the upload is undone.
 - `extensions` (List of String) File extensions accepted, lower case without the dot (e.g. ["pdf", "png", "jpg"]), matched case-insensitively. Leave it out for the API's default list: pdf, png, jpg, jpeg, gif, webp, heic, txt, rtf, doc, docx, xls, xlsx, csv, odt, ods. Executable types (exe, bat, cmd, com, js, msi, ps1, scr, vbs, sh, dll) are never accepted.
+- `invites` (Boolean) Accept one-time upload invites: a link that lets whoever holds it, with no account, upload one document to the one row it was sent for, once, under this block's limits and fixed columns. Sending one through the API needs invite on the documents permission at the sender's tier plus create there (e.g. casedocuments = ["team", "create:team", "invite:team"] in dataversecontact_permissions_sync.default_permissions); sending from Dataverse needs the Portal Invite Sender role instead. Defaults to false. Needs Contact API 1.36.0 or later: an older API keeps the key without an error but makes no invites.
 - `max_bytes` (Number) Largest file accepted, in bytes. Leave it out for 10485760 (10 MiB). Uploads are also capped by the deployment's DOCUMENT_UPLOAD_MAX_BYTES (26214400 = 25 MiB by default), so a larger value only applies where the deployment raised that.
 
 

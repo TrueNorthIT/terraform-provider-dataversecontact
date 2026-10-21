@@ -81,6 +81,14 @@ resource "dataversecontact_table" "case" {
     entity_set = "contacts"
   }
 
+  # One-time invite links: whoever holds one can do one thing, once, with no
+  # account. "create" logs a new case for the contact the invite was sent for
+  # (the create_default above binds it); "update" changes only the fields the
+  # invite names. Adding a note is invites on the child route (casenotes,
+  # below); uploading a document is documents.upload.invites. Set where links
+  # open with invite_url on dataversecontact_permissions_sync.
+  invites = ["create", "update"]
+
   # The SharePoint documents in each case's folder, listed with
   # GET /me/case/{id}/documents and uploaded through
   # POST /me/case/{id}/documents/uploads. Both need `casedocuments`, granted in
@@ -98,9 +106,55 @@ resource "dataversecontact_table" "case" {
     # ShowOnPortal, so the citizen sees what they sent.
     upload {
       columns = { ShowOnPortal = "true" } # fixed: callers can't change it
+      invites = true                      # a one-time invite link may upload one file
       # max_bytes  = 5242880              # default 10 MiB, never above the deployment's cap
       # extensions = ["pdf", "jpg", "png"] # default: common documents and images
     }
+  }
+}
+
+# A child of case: the notes on it. invites = ["create"] lets an invite sent on
+# a case add one note to that case ("please add the photos you mentioned").
+# The invitee sets only the writable fields that aren't lookups (subject and
+# notetext): the note always goes on the invite's case, through the field whose
+# bind_field is parent_table's navigation_property.
+resource "dataversecontact_table" "casenotes" {
+  scope               = "default"
+  route_name          = "casenotes"
+  description         = "Notes on the citizen's cases"
+  dataverse_table     = "annotations"
+  primary_key         = "annotationid"
+  required_permission = "casenotes"
+  filters             = ["objecttypecode eq 'incident'"]
+
+  default_select = ["annotationid", "subject", "notetext", "createdon"]
+  lookup_fields  = ["subject"]
+
+  invites = ["create"]
+
+  parent_table {
+    table               = "case"
+    navigation_property = "objectid_incident"
+  }
+
+  # me: note -> its case -> the case's citizen.
+  contact_join_step {
+    table = "incidents"
+    from  = "objectid_incident"
+    key   = "incidentid"
+  }
+  contact_join_step {
+    table = "contacts"
+    from  = "customerid_contact"
+    key   = "contactid"
+  }
+
+  fields = {
+    annotationid = { type = "string", description = "Note id.", read_only = true }
+    subject      = { type = "string", description = "Note title." }
+    notetext     = { type = "string", description = "Note text." }
+    objectid     = { type = "lookup", description = "The case.", lookup_table = "case", bind_field = "objectid_incident" }
+    createdon    = { type = "datetime", description = "Added on.", read_only = true }
   }
 }
 

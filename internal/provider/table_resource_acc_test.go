@@ -530,6 +530,7 @@ func TestAccTable_everyAttribute(t *testing.T) {
   public_choices         = false
   public_read            = true
   public_create          = true
+  invites                = ["update", "create"]
   business_process       = {}
 
   files = {
@@ -578,6 +579,7 @@ func TestAccTable_everyAttribute(t *testing.T) {
       max_bytes  = 1048576
       extensions = ["pdf"]
       columns    = { ShowOnPortal = "true", DocType = "Citizen upload" }
+      invites    = true
     }
   }
 
@@ -855,6 +857,22 @@ func TestAccTable_validateConfig(t *testing.T) {
   }`),
 				ExpectError: regexp.MustCompile(`at\s+least\s+1`),
 			},
+			// invites, as the API's contract (1.36.0) would refuse it. The last
+			// is refused only by the API's build, which drops the table.
+			{
+				Config:      caseTable(s, baseFields, `  invites = []`),
+				ExpectError: regexp.MustCompile(`at\s+least\s+1`),
+			},
+			{
+				Config:      caseTable(s, baseFields, `  invites = ["create", "upload"]`),
+				ExpectError: regexp.MustCompile(`value\s+must\s+be\s+one\s+of`),
+			},
+			{
+				Config: caseTable(s, baseFields, `
+  dataverse_logical_name = "contact"
+  invites                = ["update", "create"]`),
+				ExpectError: regexp.MustCompile(`Contacts\s+take\s+no\s+create\s+invites`),
+			},
 		},
 	})
 }
@@ -1056,6 +1074,7 @@ func TestAccTable_documentsUpload(t *testing.T) {
 						"max_bytes":  knownvalue.Null(),
 						"extensions": knownvalue.Null(),
 						"columns":    knownvalue.Null(),
+						"invites":    knownvalue.Null(),
 					})),
 				},
 			},
@@ -1126,6 +1145,195 @@ func TestAccTable_documentsUpload(t *testing.T) {
 				Check:  published(nil),
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(caseAddress, uploadPath, knownvalue.Null()),
+				},
+			},
+		},
+	})
+}
+
+// invites over its life. A table without it publishes no key and plans clean
+// however the API spells "none" (absent, null or []); the set goes out sorted
+// and reads back as the same set whatever order the API holds it in; a value
+// changed outside Terraform is drift the next apply puts back; and removing
+// the attribute removes the key.
+func TestAccTable_invites(t *testing.T) {
+	s := fakeapi.New(t)
+	both := `  invites = ["update", "create"]`
+	invitesPath := tfjsonpath.New("invites")
+	published := func(want []any) resource.TestCheckFunc {
+		return func(*terraform.State) error {
+			got, ok := s.Table("default", "case")["invites"]
+			switch {
+			case want == nil && ok:
+				return fmt.Errorf("invites published without the attribute: %#v", got)
+			case want != nil && !reflect.DeepEqual(got, want):
+				return fmt.Errorf("published invites = %#v, want %#v", got, want)
+			}
+			return nil
+		}
+	}
+	stored := func(invites any) func() {
+		return func() { s.EditTable("default", "case", func(m map[string]any) { m["invites"] = invites }) }
+	}
+	emptyPlan := resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()}}
+	update := resource.ConfigPlanChecks{
+		PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(caseAddress, plancheck.ResourceActionUpdate)},
+	}
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             tablesGone(s),
+		Steps: []resource.TestStep{
+			{
+				Config: caseTable(s, baseFields),
+				Check:  published(nil),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, invitesPath, knownvalue.Null()),
+				},
+			},
+			{
+				// The published hint spells "no invites" as null.
+				PreConfig:        stored(nil),
+				Config:           caseTable(s, baseFields),
+				ConfigPlanChecks: emptyPlan,
+			},
+			{
+				// The Table Manager may save "none" as an empty list.
+				PreConfig:        stored([]any{}),
+				Config:           caseTable(s, baseFields),
+				ConfigPlanChecks: emptyPlan,
+			},
+			{
+				Config:           caseTable(s, baseFields, both),
+				ConfigPlanChecks: update,
+				Check:            published([]any{"create", "update"}),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, invitesPath, knownvalue.SetExact([]knownvalue.Check{
+						knownvalue.StringExact("create"), knownvalue.StringExact("update"),
+					})),
+				},
+			},
+			{
+				// The same set in another order, as the Table Manager may save it.
+				PreConfig:        stored([]any{"update", "create"}),
+				Config:           caseTable(s, baseFields, both),
+				ConfigPlanChecks: emptyPlan,
+			},
+			{
+				// An operation taken away outside Terraform is drift: put it back.
+				PreConfig:        stored([]any{"update"}),
+				Config:           caseTable(s, baseFields, both),
+				ConfigPlanChecks: update,
+				Check:            published([]any{"create", "update"}),
+			},
+			{
+				ResourceName:      caseAddress,
+				ImportState:       true,
+				ImportStateId:     "default/case",
+				ImportStateVerify: true,
+			},
+			{
+				Config: caseTable(s, baseFields, `  invites = ["create"]`),
+				Check:  published([]any{"create"}),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, invitesPath, knownvalue.SetExact([]knownvalue.Check{
+						knownvalue.StringExact("create"),
+					})),
+				},
+			},
+			{
+				Config: caseTable(s, baseFields),
+				Check:  published(nil),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, invitesPath, knownvalue.Null()),
+				},
+			},
+		},
+	})
+}
+
+// documents.upload.invites over its life. Left out, nothing is sent; true goes
+// out as true; false is not sent but stays false in state, so neither plans a
+// change after apply; turned off outside Terraform is drift; and removing it
+// removes the key.
+func TestAccTable_documentsUploadInvites(t *testing.T) {
+	s := fakeapi.New(t)
+	documents := func(upload string) string {
+		return `
+  documents {
+    permission = "casedocuments"
+    columns    = { ShowOnPortal = "boolean" }
+    filters    = ["ShowOnPortal eq true"]
+    upload {` + upload + `
+    }
+  }`
+	}
+	invitesPath := tfjsonpath.New("documents").AtMapKey("upload").AtMapKey("invites")
+	published := func(want map[string]any) resource.TestCheckFunc {
+		return func(*terraform.State) error {
+			documents, _ := s.Table("default", "case")["documents"].(map[string]any)
+			if got := documents["upload"]; !reflect.DeepEqual(got, want) {
+				return fmt.Errorf("published upload = %#v, want %#v", got, want)
+			}
+			return nil
+		}
+	}
+	update := resource.ConfigPlanChecks{
+		PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(caseAddress, plancheck.ResourceActionUpdate)},
+	}
+	on := "\n      invites = true"
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             tablesGone(s),
+		Steps: []resource.TestStep{
+			{
+				Config: caseTable(s, baseFields, documents("")),
+				Check:  published(map[string]any{}),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, invitesPath, knownvalue.Null()),
+				},
+			},
+			{
+				Config:           caseTable(s, baseFields, documents(on)),
+				ConfigPlanChecks: update,
+				Check:            published(map[string]any{"invites": true}),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, invitesPath, knownvalue.Bool(true)),
+				},
+			},
+			{
+				ResourceName:      caseAddress,
+				ImportState:       true,
+				ImportStateId:     "default/case",
+				ImportStateVerify: true,
+			},
+			{
+				// Turned off outside Terraform: drift, put back.
+				PreConfig: func() {
+					s.EditTable("default", "case", func(m map[string]any) {
+						m["documents"].(map[string]any)["upload"].(map[string]any)["invites"] = false
+					})
+				},
+				Config:           caseTable(s, baseFields, documents(on)),
+				ConfigPlanChecks: update,
+				Check:            published(map[string]any{"invites": true}),
+			},
+			{
+				// false isn't sent, and reads back as the false the config wrote.
+				Config: caseTable(s, baseFields, documents(`
+      columns = { ShowOnPortal = "true" }
+      invites = false`)),
+				Check: published(map[string]any{"columns": map[string]any{"ShowOnPortal": true}}),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, invitesPath, knownvalue.Bool(false)),
+				},
+			},
+			{
+				Config: caseTable(s, baseFields, documents("")),
+				Check:  published(map[string]any{}),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, invitesPath, knownvalue.Null()),
 				},
 			},
 		},

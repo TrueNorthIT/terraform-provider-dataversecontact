@@ -40,6 +40,7 @@ type SchemaHintJSON struct {
 	PublicChoices             *bool                    `json:"publicChoices,omitempty"`
 	PublicRead                *bool                    `json:"publicRead,omitempty"`
 	PublicCreate              *bool                    `json:"publicCreate,omitempty"`
+	Invites                   []string                 `json:"invites,omitempty"`
 	PermissionGroup           string                   `json:"permissionGroup,omitempty"`
 	FetchXml                  string                   `json:"fetchXml,omitempty"`
 	Fields                    map[string]FieldHintJSON `json:"fields"`
@@ -178,6 +179,9 @@ func modelToSchemaJSON(ctx context.Context, model *TableResourceModel, diags *di
 		}
 	}
 
+	// One-time invite links. No attribute, no key.
+	hint.Invites = invitesModelToJSON(ctx, model.Invites, diags)
+
 	// Fields map
 	hint.Fields = fieldsModelToJSON(ctx, model.Fields, diags)
 
@@ -289,6 +293,7 @@ func schemaJSONToModel(ctx context.Context, raw json.RawMessage, model *TableRes
 	} else {
 		model.PublicCreate = types.BoolValue(false)
 	}
+	model.Invites = invitesJSONToModel(hint.Invites)
 
 	// Fields map
 	model.Fields = fieldsJSONToModel(ctx, hint.Fields, model.Fields, diags)

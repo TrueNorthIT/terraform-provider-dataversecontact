@@ -23,7 +23,8 @@ import (
 )
 
 // SharePoint documents on a table's rows (`documents` on the API's schema
-// hint, Contact API 1.34.0; `documents.upload`, 1.35.0). The checks here are
+// hint, Contact API 1.34.0; `documents.upload`, 1.35.0;
+// `documents.upload.invites`, 1.36.0). The checks here are
 // the ones the API's build makes (server/config/scopes/documents.ts). The API's
 // save does not run them for documents, and a hint that fails them is
 // published anyway, then left out of the scope when the registry builds: the
@@ -50,6 +51,7 @@ type DocumentsUploadModel struct {
 	MaxBytes   types.Int64 `tfsdk:"max_bytes"`
 	Extensions types.List  `tfsdk:"extensions"`
 	Columns    types.Map   `tfsdk:"columns"`
+	Invites    types.Bool  `tfsdk:"invites"`
 }
 
 // DocumentsJSON is the hint's `documents` key.
@@ -64,11 +66,13 @@ type DocumentsJSON struct {
 // DocumentsUploadJSON is `documents.upload`. Absent means no uploads; `{}`
 // means uploads with the API's defaults. Columns holds each fixed value as
 // sent or read: the provider writes it typed by the column's declared type,
-// and the API also accepts (and keeps) strings.
+// and the API also accepts (and keeps) strings. Invites is sent only when
+// true: false and absent both mean no upload invites.
 type DocumentsUploadJSON struct {
 	MaxBytes   *int64                     `json:"maxBytes,omitempty"`
 	Extensions []string                   `json:"extensions,omitempty"`
 	Columns    map[string]json.RawMessage `json:"columns,omitempty"`
+	Invites    bool                       `json:"invites,omitempty"`
 }
 
 // DocumentColumnsJSON is `documents.columns`. The provider always writes the
@@ -228,7 +232,8 @@ func documentsUploadBlock() schema.SingleNestedBlock {
 			"overwrites another (SharePoint renames a clash), and a row with no folder yet gets one. Grant the " +
 			"API's service principal Sites.Selected with Write on the site, and its Dataverse app user Create on " +
 			"Document Location. The upload URL is in the API's downloads storage, as for file downloads, and the " +
-			"storage account needs a CORS rule allowing PUT from the portal. Needs Contact API 1.35.0 or later: " +
+			"storage account needs a CORS rule allowing PUT from the portal. Set invites = true to let a one-time " +
+			"invite link upload one file too. Needs Contact API 1.35.0 or later: " +
 			"an older API keeps the key without an error but accepts no uploads.",
 		Attributes: map[string]schema.Attribute{
 			"max_bytes": schema.Int64Attribute{
@@ -262,6 +267,16 @@ func documentsUploadBlock() schema.SingleNestedBlock {
 				Validators: []validator.Map{
 					mapvalidator.SizeAtLeast(1),
 				},
+			},
+			"invites": schema.BoolAttribute{
+				Description: "Accept one-time upload invites: a link that lets whoever holds it, with no account, " +
+					"upload one document to the one row it was sent for, once, under this block's limits and fixed " +
+					"columns. Sending one through the API needs invite on the documents permission at the sender's " +
+					"tier plus create there (e.g. casedocuments = [\"team\", \"create:team\", \"invite:team\"] in " +
+					"dataversecontact_permissions_sync.default_permissions); sending from Dataverse needs the Portal " +
+					"Invite Sender role instead. Defaults to false. Needs Contact API 1.36.0 or later: an older API " +
+					"keeps the key without an error but makes no invites.",
+				Optional: true,
 			},
 		},
 	}
@@ -569,6 +584,7 @@ func documentsUploadModelToJSON(ctx context.Context, u *DocumentsUploadModel, co
 	}
 	out := &DocumentsUploadJSON{
 		Extensions: tfListToStrings(ctx, u.Extensions, diags),
+		Invites:    u.Invites.ValueBool(), // false for null or unknown
 	}
 	if !u.MaxBytes.IsNull() && !u.MaxBytes.IsUnknown() {
 		maxBytes := u.MaxBytes.ValueInt64()
@@ -625,6 +641,7 @@ func documentsJSONToModel(d *DocumentsJSON, prior *DocumentsModel) *DocumentsMod
 
 // documentsUploadJSONToModel: absent and null read back as no block, {} as a
 // block with every attribute null, matching `upload {}` in the config.
+// invites is never sent as false, so it reads back as keepFalse does.
 func documentsUploadJSONToModel(u *DocumentsUploadJSON, prior *DocumentsUploadModel) *DocumentsUploadModel {
 	if u == nil {
 		return nil
@@ -633,10 +650,15 @@ func documentsUploadJSONToModel(u *DocumentsUploadJSON, prior *DocumentsUploadMo
 	if u.MaxBytes != nil {
 		maxBytes = types.Int64Value(*u.MaxBytes)
 	}
+	var priorInvites attr.Value
+	if prior != nil {
+		priorInvites = prior.Invites
+	}
 	return &DocumentsUploadModel{
 		MaxBytes:   maxBytes,
 		Extensions: stringsToTFListOrNull(u.Extensions),
 		Columns:    documentUploadColumnsToModel(u.Columns, prior),
+		Invites:    keepFalse(u.Invites, priorInvites),
 	}
 }
 

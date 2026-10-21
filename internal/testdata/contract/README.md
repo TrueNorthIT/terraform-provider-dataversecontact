@@ -44,6 +44,18 @@ with `documents.upload` (API 1.35.0): `maxBytes`, `extensions`, and fixed `colum
 as their declared column types (a JSON boolean, string and number), which is how the provider sends
 them. Re-record it from the live API once 1.35.0 is deployed.
 
+**From the API contract, until it ships** (`get-table-published-case-invites`,
+`get-table-published-notes-invites`): one-time invite links (API 1.36.0). The case fixture is the
+upload one with `invites: ["create", "update"]` and `documents.upload.invites: true`; the notes
+fixture is the recorded `projectnotes` child route with `invites: ["create"]`, the shape for "add a
+note to this record". `InviteOperation` and `DocumentUploadSettings.invites` in
+`server/config/scopes/types.ts`; the admin GET returns the hint as authored, so `invites` comes back
+in the order it was saved (the provider sends it sorted). Re-record both from the live API once
+1.36.0 is deployed.
+
+`put-defaults` echoes a body with `inviteUrl` (API 1.36.0, `ScopeDefaults.inviteUrl`), which the
+handler returns as sent.
+
 ## Refreshing
 
 When the API changes a response, update the fixture first, then make the client and the fake
