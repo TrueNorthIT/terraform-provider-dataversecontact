@@ -21,7 +21,7 @@ resource "dataversecontact_permissions_sync" "default" {
 
   # Baseline permissions granted to every authenticated contact, keyed by
   # route name. Tokens: "me" / "team" / "all" read tiers, plus "write",
-  # "write:all" and "create".
+  # "write:all", "create" and "invite" (sending invite links).
   default_permissions = {
     case    = ["me", "write", "create"]
     contact = ["me"]
@@ -30,6 +30,12 @@ resource "dataversecontact_permissions_sync" "default" {
   # Let signed-in callers without a Dataverse contact self-register
   # (defaults to false).
   allow_self_register = true
+
+  # Where one-time invite links open: the portal page that uses them, with
+  # {token} where the token goes. In the fragment (#), the token never reaches
+  # the portal's server, its logs or a Referer header. Omit it and invites come
+  # back with a token but no link.
+  invite_url = "https://portal.example.gov.uk/invite#token={token}"
 
   # Re-publish whenever any table definition changes. With real table
   # resources in the same config, hash their ids and add depends_on:
@@ -75,6 +81,17 @@ resource "dataversecontact_permissions_sync" "default" {
   # with the email in):
   #
   #   contact_filters = ["cpa_portaluser eq true"]
+  #
+  # For scopes whose users send invite links themselves, through the portal or
+  # an agent: "invite" at their tier, plus what the invitee will do there
+  # ("write" for an update invite, "create" otherwise). Everyone here gets it,
+  # so on a citizen portal leave it out and send from Dataverse instead, which
+  # needs only the Portal Invite Sender role:
+  #
+  #   default_permissions = {
+  #     case          = ["team", "write:team", "create:team", "invite:team"]
+  #     casedocuments = ["team", "create:team", "invite:team"] # upload invites
+  #   }
 }
 
 output "permission_count" {
@@ -95,7 +112,8 @@ output "permission_count" {
 - `company_model` (Attributes) How this scope resolves a person to the companies they may act as. Omit for the classic parent-account (multi-contact) model. Published as `companyModel` in the scope's defaults.json. (see [below for nested schema](#nestedatt--company_model))
 - `contact_email_column` (String) The contact column holding the address people sign in with, as a logical name (e.g. "emailaddress2" or "cr123_portalemail"). A signed-in caller's verified email is matched against it, self-registration writes the address there, and no update through the API can change it. Omit to use the API's default: its CONTACT_EMAIL_COLUMN setting, else "emailaddress1". The column must exist on the contact table, and existing contacts need their address in it before you switch. Published as `contactEmailColumn` in the scope's defaults.json.
 - `contact_filters` (List of String) Extra OData conditions a contact must meet to count as the signed-in person, all of which must hold — written like a table's filters, e.g. ["cpa_portaluser eq true"]. A contact with the signed-in email that fails them is "not enabled": every call answers 403 with code "contact_not_enabled", and self-registration won't create a second contact to get round it. The API runs them against the scope's contacts before saving, so one Dataverse can't run fails the apply. Omit to let every active contact with the email sign in. Published as `contactFilters` in the scope's defaults.json.
-- `default_permissions` (Map of List of String) The baseline permissions granted to every authenticated contact, keyed by route name. Each value is the list of permission tokens for that route (e.g. ["team", "write", "create"]). Known tokens: the read tiers "me" (rows reachable from the caller's own contact via the table's contact join), "team" and "all" (every row), plus "write" (update within the granted read tier), "write:all" and "create". A table's documents.permission is a key here too: its read tiers list the documents (e.g. casedocuments = ["me"]), and "create" uploads them where the documents block has an upload block (casedocuments = ["me", "create"]). Published as the `permissions` object of the scope's defaults.json.
+- `default_permissions` (Map of List of String) The baseline permissions granted to every authenticated contact, keyed by route name. Each value is the list of permission tokens for that route (e.g. ["team", "write", "create"]). Known tokens: the read tiers "me" (rows reachable from the caller's own contact via the table's contact join), "team" and "all" (every row), plus "write" (update within the granted read tier), "write:all" and "create". A table's documents.permission is a key here too: its read tiers list the documents (e.g. casedocuments = ["me"]), and "create" uploads them where the documents block has an upload block (casedocuments = ["me", "create"]). "invite", "invite:team" and "invite:all" let a caller send one-time invite links from that tier through the API (the portal or an agent), on a route that takes them (the table's invites) or, under the documents permission, for an upload (documents.upload.invites). A sender also needs what the invitee will do at the same tier: "write" for an update invite, "create" otherwise. invite implies nothing and nothing implies it. Officers sending invites from Dataverse need neither: they need the Portal Invite Sender role and Dataverse access to the record. Published as the `permissions` object of the scope's defaults.json.
+- `invite_url` (String) Where a one-time invite link opens: the portal page that uses invites, with {token} where the invite's token goes. Put the token in the URL's fragment, e.g. "https://portal.example.gov.uk/invite#token={token}": a fragment never leaves the browser, so the token stays out of the portal's server logs, Referer headers and analytics. Must be an https URL of at most 500 characters. Omit it and invites come back with a token but no link. The API copies it into Dataverse for the Contact Portal API solution's invite actions (solution 2.5.0.0 or later). Published as `inviteUrl` in the scope's defaults.json. Needs Contact API 1.36.0 or later: an older API keeps it without an error but makes no invites.
 - `join` (Attributes) How a signed-in caller with no Dataverse contact yet may self-join companies. Omit to just provision an unlinked contact for an officer to link. Published as `join` in the scope's defaults.json. (see [below for nested schema](#nestedatt--join))
 - `triggers` (Map of String) A map of trigger values. When any value changes, permissions are re-published. Use this to trigger a re-publish when table schemas change.
 

@@ -3,7 +3,10 @@ package resources
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"regexp"
+	"strings"
+	"unicode/utf16"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -37,6 +40,7 @@ type PermissionsSyncResourceModel struct {
 	Join               *JoinModel         `tfsdk:"join"`
 	ContactEmailColumn types.String       `tfsdk:"contact_email_column"`
 	ContactFilters     types.List         `tfsdk:"contact_filters"`
+	InviteURL          types.String       `tfsdk:"invite_url"`
 	PermissionCount    types.Int64        `tfsdk:"permission_count"`
 }
 
@@ -107,6 +111,12 @@ func (r *PermissionsSyncResource) Schema(_ context.Context, _ resource.SchemaReq
 					"A table's documents.permission is a key here too: its read tiers list the documents " +
 					"(e.g. casedocuments = [\"me\"]), and \"create\" uploads them where the documents block has " +
 					"an upload block (casedocuments = [\"me\", \"create\"]). " +
+					"\"invite\", \"invite:team\" and \"invite:all\" let a caller send one-time invite links from " +
+					"that tier through the API (the portal or an agent), on a route that takes them (the table's " +
+					"invites) or, under the documents permission, for an upload (documents.upload.invites). A sender " +
+					"also needs what the invitee will do at the same tier: \"write\" for an update invite, \"create\" " +
+					"otherwise. invite implies nothing and nothing implies it. Officers sending invites from Dataverse " +
+					"need neither: they need the Portal Invite Sender role and Dataverse access to the record. " +
 					"Published as the `permissions` object of the scope's defaults.json.",
 				Optional:    true,
 				ElementType: types.ListType{ElemType: types.StringType},
@@ -222,6 +232,18 @@ func (r *PermissionsSyncResource) Schema(_ context.Context, _ resource.SchemaReq
 					),
 				},
 			},
+			"invite_url": schema.StringAttribute{
+				Description: "Where a one-time invite link opens: the portal page that uses invites, with {token} " +
+					"where the invite's token goes. Put the token in the URL's fragment, e.g. " +
+					"\"https://portal.example.gov.uk/invite#token={token}\": a fragment never leaves the browser, so " +
+					"the token stays out of the portal's server logs, Referer headers and analytics. Must be an " +
+					"https URL of at most 500 characters. Omit it and invites come back with a token but no link. " +
+					"The API copies it into Dataverse for the Contact Portal API solution's invite actions (solution " +
+					"2.5.0.0 or later). Published as `inviteUrl` in the scope's defaults.json. Needs Contact API " +
+					"1.36.0 or later: an older API keeps it without an error but makes no invites.",
+				Optional:   true,
+				Validators: []validator.String{inviteURLValidator{}},
+			},
 			"permission_count": schema.Int64Attribute{
 				Description: "The number of routes with published baseline permissions.",
 				Computed:    true,
@@ -243,6 +265,48 @@ func (r *PermissionsSyncResource) Configure(_ context.Context, req resource.Conf
 		return
 	}
 	r.client = c
+}
+
+// inviteURLValidator refuses an invite_url the API would refuse.
+type inviteURLValidator struct{}
+
+func (inviteURLValidator) Description(context.Context) string {
+	return "must be an https URL of at most 500 characters containing {token}"
+}
+
+func (v inviteURLValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (inviteURLValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	if problem := inviteURLProblem(req.ConfigValue.ValueString()); problem != "" {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid invite_url", problem)
+	}
+}
+
+// inviteURLProblem mirrors the API's inviteUrlProblem
+// (server/config/scopes/build.ts), whose refusal fails the defaults PUT with a
+// 400: at most 500 characters (counted as JavaScript does), {token} in it,
+// and an absolute https URL once the token is in place.
+func inviteURLProblem(value string) string {
+	const example = `e.g. "https://portal.example.gov.uk/invite#token={token}"`
+	if len(utf16.Encode([]rune(value))) > 500 {
+		return "must be a URL of up to 500 characters, " + example
+	}
+	if !strings.Contains(value, "{token}") {
+		return "must contain {token} where the invite's token goes, " + example
+	}
+	u, err := url.Parse(strings.ReplaceAll(value, "{token}", "t"))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "isn't a URL, " + example
+	}
+	if u.Scheme != "https" {
+		return "must be https, " + example
+	}
+	return ""
 }
 
 // buildPermissions converts the default_permissions map attribute into the
@@ -318,6 +382,8 @@ func (r *PermissionsSyncResource) publish(ctx context.Context, plan *Permissions
 		}
 	}
 
+	inviteURL := plan.InviteURL.ValueString()
+
 	tflog.Info(ctx, "Publishing scope default permissions", map[string]interface{}{
 		"scope":                scope,
 		"routes":               len(permissions),
@@ -326,9 +392,10 @@ func (r *PermissionsSyncResource) publish(ctx context.Context, plan *Permissions
 		"join":                 join != nil,
 		"contact_email_column": contactEmailColumn,
 		"contact_filters":      len(contactFilters),
+		"invite_url":           inviteURL != "",
 	})
 
-	if _, err := r.client.PublishDefaults(ctx, scope, permissions, allowSelfRegister, companyModel, join, contactEmailColumn, contactFilters); err != nil {
+	if _, err := r.client.PublishDefaults(ctx, scope, permissions, allowSelfRegister, companyModel, join, contactEmailColumn, contactFilters, inviteURL); err != nil {
 		resp.AddError("Failed to publish permissions", err.Error())
 		return
 	}

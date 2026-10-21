@@ -6,7 +6,7 @@ resource "dataversecontact_permissions_sync" "default" {
 
   # Baseline permissions granted to every authenticated contact, keyed by
   # route name. Tokens: "me" / "team" / "all" read tiers, plus "write",
-  # "write:all" and "create".
+  # "write:all", "create" and "invite" (sending invite links).
   default_permissions = {
     case    = ["me", "write", "create"]
     contact = ["me"]
@@ -15,6 +15,12 @@ resource "dataversecontact_permissions_sync" "default" {
   # Let signed-in callers without a Dataverse contact self-register
   # (defaults to false).
   allow_self_register = true
+
+  # Where one-time invite links open: the portal page that uses them, with
+  # {token} where the token goes. In the fragment (#), the token never reaches
+  # the portal's server, its logs or a Referer header. Omit it and invites come
+  # back with a token but no link.
+  invite_url = "https://portal.example.gov.uk/invite#token={token}"
 
   # Re-publish whenever any table definition changes. With real table
   # resources in the same config, hash their ids and add depends_on:
@@ -60,6 +66,17 @@ resource "dataversecontact_permissions_sync" "default" {
   # with the email in):
   #
   #   contact_filters = ["cpa_portaluser eq true"]
+  #
+  # For scopes whose users send invite links themselves, through the portal or
+  # an agent: "invite" at their tier, plus what the invitee will do there
+  # ("write" for an update invite, "create" otherwise). Everyone here gets it,
+  # so on a citizen portal leave it out and send from Dataverse instead, which
+  # needs only the Portal Invite Sender role:
+  #
+  #   default_permissions = {
+  #     case          = ["team", "write:team", "create:team", "invite:team"]
+  #     casedocuments = ["team", "create:team", "invite:team"] # upload invites
+  #   }
 }
 
 output "permission_count" {

@@ -459,7 +459,8 @@ func TestAccPermissionsSync_removeSettings(t *testing.T) {
   contact_email_column = "emailaddress2"
   contact_filters      = ["cpa_portaluser eq true"]
   company_model        = { strategy = "parent-account" }
-  join                 = { strategy = "domain-list", domain_field = "new_portaldomains" }`),
+  join                 = { strategy = "domain-list", domain_field = "new_portaldomains" }
+  invite_url           = "https://portal.example.gov.uk/invite#token={token}"`),
 			},
 			{
 				Config: permissionsSync(s, ``),
@@ -503,6 +504,19 @@ func TestAccPermissionsSync_invalidConfig(t *testing.T) {
     associated_accounts = { account_id_field = "accountid" }
   }`),
 				ExpectError: regexp.MustCompile(`fetch_xml`),
+			},
+			// invite_url, as the API's defaults PUT would refuse it (a 400).
+			{
+				Config:      permissionsSync(s, `  invite_url = "http://portal.example.gov.uk/invite#token={token}"`),
+				ExpectError: regexp.MustCompile(`must\s+be\s+https`),
+			},
+			{
+				Config:      permissionsSync(s, `  invite_url = "https://portal.example.gov.uk/invite"`),
+				ExpectError: regexp.MustCompile(`must\s+contain\s+\{token\}`),
+			},
+			{
+				Config:      permissionsSync(s, `  invite_url = "/invite#token={token}"`),
+				ExpectError: regexp.MustCompile(`isn't\s+a\s+URL`),
 			},
 		},
 	})

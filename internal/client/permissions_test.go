@@ -23,7 +23,7 @@ func TestPublishDefaults(t *testing.T) {
 
 	c := NewClient(server.URL, "key")
 	perms := map[string][]string{"case": {"team", "write", "create"}}
-	resp, err := c.PublishDefaults(context.Background(), "default", perms, true, nil, nil, "", nil)
+	resp, err := c.PublishDefaults(context.Background(), "default", perms, true, nil, nil, "", nil, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestPublishDefaultsCompanyModel(t *testing.T) {
 		Strategy:           "associated-accounts",
 		AssociatedAccounts: &AssociatedAccountsQuery{Relationship: "cr_contact_accounts"},
 	}
-	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, cm, nil, "", nil); err != nil {
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, cm, nil, "", nil, ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -91,7 +91,7 @@ func TestPublishDefaultsJoin(t *testing.T) {
 
 	c := NewClient(server.URL, "key")
 	join := &JoinConfig{Strategy: "domain-list", DomainField: "new_portaldomains", RequireMatch: true}
-	if _, err := c.PublishDefaults(context.Background(), "default", nil, true, nil, join, "", nil); err != nil {
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, true, nil, join, "", nil, ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -120,7 +120,7 @@ func TestPublishDefaultsNilPermissions(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient(server.URL, "key")
-	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil, nil, "", nil); err != nil {
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil, nil, "", nil, ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -140,7 +140,7 @@ func TestPublishDefaultsContactEmailColumn(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient(server.URL, "key")
-	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil, nil, "emailaddress2", nil); err != nil {
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil, nil, "emailaddress2", nil, ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -161,7 +161,7 @@ func TestPublishDefaultsOmitsUnsetContactEmailColumn(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient(server.URL, "key")
-	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil, nil, "", nil); err != nil {
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil, nil, "", nil, ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -182,7 +182,7 @@ func TestPublishDefaultsContactFilters(t *testing.T) {
 
 	c := NewClient(server.URL, "key")
 	filters := []string{"cpa_portaluser eq true"}
-	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil, nil, "", filters); err != nil {
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil, nil, "", filters, ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -203,11 +203,53 @@ func TestPublishDefaultsOmitsUnsetContactFilters(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient(server.URL, "key")
-	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil, nil, "", nil); err != nil {
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil, nil, "", nil, ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if _, ok := gotBody["contactFilters"]; ok {
 		t.Errorf("expected no contactFilters key when unset, got %s", gotBody["contactFilters"])
+	}
+}
+
+func TestPublishDefaultsInviteURL(t *testing.T) {
+	var gotBody PublishDefaultsRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "key")
+	url := "https://portal.example.gov.uk/invite#token={token}"
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil, nil, "", nil, url); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotBody.InviteURL != url {
+		t.Errorf("expected inviteUrl %q, got %q", url, gotBody.InviteURL)
+	}
+}
+
+// Unset, the key is left out, so invites come back with a token and no link.
+func TestPublishDefaultsOmitsUnsetInviteURL(t *testing.T) {
+	var gotBody map[string]json.RawMessage
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "key")
+	if _, err := c.PublishDefaults(context.Background(), "default", nil, false, nil, nil, "", nil, ""); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, ok := gotBody["inviteUrl"]; ok {
+		t.Errorf("expected no inviteUrl key when unset, got %s", gotBody["inviteUrl"])
 	}
 }

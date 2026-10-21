@@ -17,7 +17,9 @@ import (
 // contactEmailColumn names the contact column people sign in with — empty
 // leaves it out, so the API uses emailaddress1. contactFilters are extra OData
 // conditions a contact must meet to sign in — empty leaves them out.
-func (c *Client) PublishDefaults(ctx context.Context, scope string, permissions map[string][]string, allowSelfRegister bool, companyModel *CompanyModel, join *JoinConfig, contactEmailColumn string, contactFilters []string) (*PublishDefaultsResponse, error) {
+// inviteURL is the portal page an invite link opens, with {token} where the
+// token goes — empty leaves it out, so invites come without a link.
+func (c *Client) PublishDefaults(ctx context.Context, scope string, permissions map[string][]string, allowSelfRegister bool, companyModel *CompanyModel, join *JoinConfig, contactEmailColumn string, contactFilters []string, inviteURL string) (*PublishDefaultsResponse, error) {
 	url := c.adminURL(scope, "table-manager/defaults")
 	if permissions == nil {
 		permissions = map[string][]string{}
@@ -29,6 +31,7 @@ func (c *Client) PublishDefaults(ctx context.Context, scope string, permissions 
 		Join:               join,
 		ContactEmailColumn: contactEmailColumn,
 		ContactFilters:     contactFilters,
+		InviteURL:          inviteURL,
 	}
 	var resp PublishDefaultsResponse
 	if err := c.doJSON(ctx, "PUT", url, body, &resp); err != nil {

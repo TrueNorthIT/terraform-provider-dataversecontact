@@ -228,6 +228,9 @@ type PublishDefaultsRequest struct {
 	// Extra OData conditions a contact must meet to count as the signed-in
 	// person. Empty is omitted, and every active contact with the email counts.
 	ContactFilters []string `json:"contactFilters,omitempty"`
+	// The portal page an invite link opens, with {token} where the invite's
+	// token goes. Empty is omitted, and invites come without a link.
+	InviteURL string `json:"inviteUrl,omitempty"`
 }
 
 // JoinConfig mirrors the API's per-scope self-serve join config. Omitted (nil)

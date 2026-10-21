@@ -185,10 +185,14 @@ func TestAccPermissionsSync(t *testing.T) {
 			},
 			{
 				Config: permissionsSync(s, `
-  default_permissions  = { case = ["me"] }
+  default_permissions = {
+    case          = ["me", "team", "write:team", "invite:team"]
+    casedocuments = ["me", "create", "invite"]
+  }
   allow_self_register  = true
   contact_email_column = "emailaddress2"
   contact_filters      = ["cpa_portaluser eq true", "address1_line1 eq 'banana road'"]
+  invite_url           = "https://portal.example.gov.uk/invite#token={token}"
   company_model = {
     strategy            = "associated-accounts"
     associated_accounts = { relationship = "new_contact_account" }
@@ -199,10 +203,14 @@ func TestAccPermissionsSync(t *testing.T) {
     require_match = true
   }`),
 				Check: expectDefaults(s, map[string]any{
-					"permissions":        map[string]any{"case": []any{"me"}},
+					"permissions": map[string]any{
+						"case":          []any{"me", "team", "write:team", "invite:team"},
+						"casedocuments": []any{"me", "create", "invite"},
+					},
 					"allowSelfRegister":  true,
 					"contactEmailColumn": "emailaddress2",
 					"contactFilters":     []any{"cpa_portaluser eq true", "address1_line1 eq 'banana road'"},
+					"inviteUrl":          "https://portal.example.gov.uk/invite#token={token}",
 					"companyModel": map[string]any{
 						"strategy":           "associated-accounts",
 						"associatedAccounts": map[string]any{"relationship": "new_contact_account"},
@@ -213,10 +221,14 @@ func TestAccPermissionsSync(t *testing.T) {
 			{
 				// A changed trigger re-publishes with nothing else changed.
 				Config: permissionsSync(s, `
-  default_permissions  = { case = ["me"] }
+  default_permissions = {
+    case          = ["me", "team", "write:team", "invite:team"]
+    casedocuments = ["me", "create", "invite"]
+  }
   allow_self_register  = true
   contact_email_column = "emailaddress2"
   contact_filters      = ["cpa_portaluser eq true", "address1_line1 eq 'banana road'"]
+  invite_url           = "https://portal.example.gov.uk/invite#token={token}"
   company_model = {
     strategy            = "associated-accounts"
     associated_accounts = { relationship = "new_contact_account" }
