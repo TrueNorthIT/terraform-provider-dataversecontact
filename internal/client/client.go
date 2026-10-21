@@ -69,7 +69,8 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body interfa
 	}
 
 	// mayHaveLanded is set once an attempt fails in a way that doesn't say
-	// whether the API acted on it: no response, or a gateway's 502 or 504.
+	// whether the API acted on it: a gateway's 502 or 504, or no response to a
+	// request that got as far as a connection.
 	mayHaveLanded := false
 	for attempt := 1; ; attempt++ {
 		var reqBody io.Reader
@@ -98,13 +99,16 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body interfa
 			return respBody, status, nil
 		}
 
-		if !retryable(method, status) || ctx.Err() != nil {
+		if ctx.Err() != nil {
 			return respBody, status, err
+		}
+		if !retryable(method, status) {
+			return respBody, status, c.notRetried(err)
 		}
 		if attempt > c.MaxRetries {
 			return respBody, status, c.gaveUp(err, attempt)
 		}
-		if status == 0 || status == http.StatusBadGateway || status == http.StatusGatewayTimeout {
+		if status == http.StatusBadGateway || status == http.StatusGatewayTimeout || (status == 0 && !neverSent(err)) {
 			mayHaveLanded = true
 		}
 
@@ -158,13 +162,14 @@ func (c *Client) send(ctx context.Context, req *http.Request) (respBody []byte, 
 // they retry anything that may be a passing problem: no response, which
 // includes an attempt that ran out of time, 429, and the gateway statuses a
 // cold or overloaded App Service answers with. POST publishes, unpublishes and
-// removes, and a second publish of a draft the first one already took fails;
-// so a POST only retries 429 and 503, which say the API did not act.
+// removes, and a second publish of a draft the first one already took fails.
+// Even a 503 doesn't prove the API did nothing (a front door's origin timeout
+// answers 503 after the API has the request), so a POST only retries 429.
 func retryable(method string, status int) bool {
 	switch status {
-	case http.StatusTooManyRequests, http.StatusServiceUnavailable:
+	case http.StatusTooManyRequests:
 		return true
-	case 0, http.StatusBadGateway, http.StatusGatewayTimeout:
+	case 0, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 		return method == http.MethodGet || method == http.MethodPut || method == http.MethodDelete
 	}
 	return false
@@ -185,9 +190,27 @@ func (c *Client) gaveUp(err error, attempts int) error {
 		err, attempts, plural, limit)
 }
 
+// notRetried explains a timeout that its method doesn't retry, such as a
+// publish that may have landed. Other failures are returned as they are.
+func (c *Client) notRetried(err error) error {
+	if !isTimeout(err) || c.HTTPClient.Timeout <= 0 {
+		return err
+	}
+	return fmt.Errorf("%w (timed out after %s and not retried, because the API may have acted on it; "+
+		"if the API is slow, raise timeout in the provider configuration)", err, c.HTTPClient.Timeout)
+}
+
 func isTimeout(err error) bool {
 	var netErr net.Error
 	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+// neverSent reports whether a request failed before reaching the server: the
+// name didn't resolve or the connection was refused.
+func neverSent(err error) bool {
+	var dnsErr *net.DNSError
+	var opErr *net.OpError
+	return errors.As(err, &dnsErr) || (errors.As(err, &opErr) && opErr.Op == "dial")
 }
 
 func statusError(status int, respBody []byte) error {
@@ -198,15 +221,15 @@ func statusError(status int, respBody []byte) error {
 	return fmt.Errorf("API error (%d): %s", status, string(respBody))
 }
 
-// backoff is the wait before retry n (1-based): 1s, 2s, 4s and so on up to
-// maxBackoff, scaled by a random factor between 0.5 and 1 so resources that
-// failed together don't all retry together.
+// backoff is the wait before retry n (1-based): a random time up to 1s, 2s,
+// 4s and so on, capped at maxBackoff. The whole range is random so resources
+// that timed out together don't all retry together.
 func backoff(retry int) time.Duration {
 	d := maxBackoff
 	if retry <= 5 {
 		d = min(time.Second<<(retry-1), maxBackoff)
 	}
-	return d/2 + rand.N(d/2+1)
+	return rand.N(d + 1)
 }
 
 // parseRetryAfter reads a Retry-After header in seconds or as an HTTP date.

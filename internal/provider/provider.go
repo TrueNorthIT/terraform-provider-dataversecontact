@@ -7,10 +7,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
@@ -80,14 +82,16 @@ func (p *DataverseContactProvider) Schema(_ context.Context, _ provider.SchemaRe
 				Description: "How long each attempt at an API request may take, as a Go duration such as \"90s\" or \"2m\". " +
 					"A retried request gets this long for every attempt. Defaults to \"60s\". " +
 					"Can also be set with the DATAVERSE_CONTACT_TIMEOUT environment variable.",
-				Optional: true,
+				Optional:   true,
+				Validators: []validator.String{positiveDuration{}},
 			},
 			"max_retries": schema.Int64Attribute{
 				Description: "How many times a request is retried after a failure that is safe to retry: no response " +
 					"(including an attempt that ran out of time), 429, 502, 503 or 504 for reads, saves and deletes, " +
-					"and only 429 or 503 for publish, unpublish and remove. 0 disables retries. Defaults to 3. " +
+					"and only 429 for publish, unpublish and remove. 0 disables retries. Defaults to 3. " +
 					"Can also be set with the DATAVERSE_CONTACT_MAX_RETRIES environment variable.",
-				Optional: true,
+				Optional:   true,
+				Validators: []validator.Int64{int64validator.AtLeast(0)},
 			},
 		},
 	}
@@ -157,6 +161,29 @@ func (p *DataverseContactProvider) Configure(ctx context.Context, req provider.C
 
 	resp.DataSourceData = c
 	resp.ResourceData = c
+}
+
+// positiveDuration checks a configured timeout at validate time. Configure
+// checks it again, along with the environment variable, which validation
+// never sees.
+type positiveDuration struct{}
+
+func (positiveDuration) Description(context.Context) string {
+	return `value must be a positive duration such as "90s" or "2m"`
+}
+
+func (v positiveDuration) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (positiveDuration) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	if d, err := time.ParseDuration(req.ConfigValue.ValueString()); err != nil || d <= 0 {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid timeout",
+			fmt.Sprintf(`timeout must be a positive duration such as "90s" or "2m", got %q.`, req.ConfigValue.ValueString()))
+	}
 }
 
 // resolveTimeout reads timeout from the configuration, else

@@ -91,9 +91,13 @@ func (c *Client) SaveAndPublishCustomApi(ctx context.Context, scope, routeName s
 }
 
 // DeleteCustomApi performs the full delete lifecycle: remove → permanent delete.
+// A failed remove stops it, as in DeleteTable: only an answer says whether the
+// custom API is still published.
 func (c *Client) DeleteCustomApi(ctx context.Context, scope, routeName string) error {
 	// Step 1: Remove to recycle bin
-	_, _ = c.RemoveCustomApis(ctx, scope, []string{routeName})
+	if _, err := c.RemoveCustomApis(ctx, scope, []string{routeName}); err != nil && !IsNotFound(err) {
+		return fmt.Errorf("failed to remove custom API %q: %w", routeName, err)
+	}
 
 	// Step 2: Permanently delete
 	if err := c.PermanentlyDeleteCustomApi(ctx, scope, routeName); err != nil {

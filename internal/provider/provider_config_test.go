@@ -78,6 +78,13 @@ func TestProviderConfigure_timeoutAndRetries(t *testing.T) {
 				"max_retries": tftypes.NewValue(tftypes.Number, tftypes.UnknownValue),
 			},
 			wantTimeout: client.DefaultTimeout, wantRetries: client.DefaultMaxRetries},
+		{name: "unknown falls back to the environment",
+			attrs: map[string]tftypes.Value{
+				"timeout":     tftypes.NewValue(tftypes.String, tftypes.UnknownValue),
+				"max_retries": tftypes.NewValue(tftypes.Number, tftypes.UnknownValue),
+			},
+			env:         map[string]string{"DATAVERSE_CONTACT_TIMEOUT": "3m", "DATAVERSE_CONTACT_MAX_RETRIES": "2"},
+			wantTimeout: 3 * time.Minute, wantRetries: 2},
 		{name: "bad duration", attrs: map[string]tftypes.Value{"timeout": str("soon")},
 			wantErr: `Invalid timeout: timeout must be a positive duration such as "90s" or "2m", got "soon".`},
 		{name: "zero duration", attrs: map[string]tftypes.Value{"timeout": str("0s")},
@@ -117,7 +124,8 @@ func TestProviderConfigure_timeoutAndRetries(t *testing.T) {
 	}
 }
 
-// The same settings through Terraform itself.
+// The same settings through Terraform itself. Bad values fail validation,
+// before Configure runs.
 func TestAccProvider_timeoutAndRetries(t *testing.T) {
 	s := fakeapi.New(t)
 	t.Setenv("DATAVERSE_CONTACT_TIMEOUT", "")
@@ -136,7 +144,7 @@ data "dataversecontact_scopes" "all" {}
 		// The valid step goes last: the test's destroy runs with it.
 		Steps: []resource.TestStep{
 			{Config: block(`  timeout = "a while"`), ExpectError: regexp.MustCompile(`Invalid timeout`)},
-			{Config: block(`  max_retries = -2`), ExpectError: regexp.MustCompile(`Invalid max_retries`)},
+			{Config: block(`  max_retries = -2`), ExpectError: regexp.MustCompile(`max_retries value must be at least 0`)},
 			{Config: block(`  timeout = "90s"
   max_retries = 0`)},
 		},
