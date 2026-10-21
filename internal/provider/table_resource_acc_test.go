@@ -179,6 +179,48 @@ func TestAccTable_derivedBindField(t *testing.T) {
 	})
 }
 
+// #30: a lookup saved before the API derived its bind_field has null in
+// state. The next save derives one, so an unrelated change must plan it as
+// unknown, not carry the null forward, or apply fails with an inconsistent
+// result. Fields the API never derives for stay null in the plan.
+func TestAccTable_bindFieldDerivedOnLaterSave(t *testing.T) {
+	s := fakeapi.New(t)
+
+	lookups := baseFields + `
+    customerid = { type = "lookup", description = "Customer", lookup_table = "contact" }`
+	bindOf := func(field string) tfjsonpath.Path {
+		return tfjsonpath.New("fields").AtMapKey(field).AtMapKey("bind_field")
+	}
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             tablesGone(s),
+		Steps: []resource.TestStep{
+			{
+				// No navigation property yet, so nothing is derived.
+				Config: caseTable(s, lookups),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, bindOf("customerid"), knownvalue.Null()),
+				},
+			},
+			{
+				// The API now derives one, and an unrelated change saves the table.
+				PreConfig: func() { s.SetNavProps(map[string]string{"customerid": "customerid_contact"}) },
+				Config: caseTable(s, lookups+`
+    description = { type = "string", description = "Details" }`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectUnknownValue(caseAddress, bindOf("customerid")),
+						plancheck.ExpectKnownValue(caseAddress, bindOf("title"), knownvalue.Null()),
+					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, bindOf("customerid"), knownvalue.StringExact("customerid_contact")),
+				},
+			},
+		},
+	})
+}
+
 // #17: validation findings are objects. Any save that drew a warning failed
 // to decode.
 func TestAccTable_validationWarnings(t *testing.T) {
