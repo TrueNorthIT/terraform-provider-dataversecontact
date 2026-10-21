@@ -49,6 +49,15 @@ token. It must be byte-identical to `ADMIN_CONNECTION_KEY` on the API
 deployment. Prefer supplying it via the `DATAVERSE_CONTACT_CONNECTION_KEY`
 environment variable rather than in configuration.
 
+Each request gets `timeout` (default 60 seconds) per attempt and is retried up
+to `max_retries` times (default 3) with a growing wait when the API doesn't
+answer, is rate limited, or answers 502, 503 or 504, as a cold or busy
+deployment can. Publishing, unpublishing and removing are retried only on 429
+and 503, the answers that say the API did nothing, so a publish that may
+already have happened is never sent twice. If a pipeline still times out
+against a slow API, raise `timeout` (or set `DATAVERSE_CONTACT_TIMEOUT`, e.g.
+`2m`); a lower `terraform apply -parallelism` also takes load off the API.
+
 ~> Every scope needs exactly one `dataversecontact_permissions_sync` resource.
 A scope with no published defaults grants nothing — every route answers
 `403 Missing required permission`, including reads.
@@ -61,3 +70,5 @@ A scope with no published defaults grants nothing — every route answers
 - `api_key` (String, Sensitive, Deprecated) Deprecated: use connection_key instead. Legacy static API key (Bearer token). Can also be set with the DATAVERSE_CONTACT_API_KEY environment variable.
 - `api_url` (String) Base URL of the Dataverse Contact API (e.g. https://api.dataverse-contact.tnapps.co.uk). Can also be set with the DATAVERSE_CONTACT_API_URL environment variable.
 - `connection_key` (String, Sensitive) Admin connection key (Bearer token) for authenticating with the admin endpoints. This is the same value configured as ADMIN_CONNECTION_KEY on the API deployment. Can also be set with the DATAVERSE_CONTACT_CONNECTION_KEY environment variable.
+- `max_retries` (Number) How many times a request is retried after a failure that is safe to retry: no response (including an attempt that ran out of time), 429, 502, 503 or 504 for reads, saves and deletes, and only 429 or 503 for publish, unpublish and remove. 0 disables retries. Defaults to 3. Can also be set with the DATAVERSE_CONTACT_MAX_RETRIES environment variable.
+- `timeout` (String) How long each attempt at an API request may take, as a Go duration such as "90s" or "2m". A retried request gets this long for every attempt. Defaults to "60s". Can also be set with the DATAVERSE_CONTACT_TIMEOUT environment variable.

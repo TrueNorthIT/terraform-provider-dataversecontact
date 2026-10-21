@@ -32,6 +32,15 @@ token. It must be byte-identical to `ADMIN_CONNECTION_KEY` on the API
 deployment. Prefer supplying it via the `DATAVERSE_CONTACT_CONNECTION_KEY`
 environment variable rather than in configuration.
 
+Each request gets `timeout` (default 60 seconds) per attempt and is retried up
+to `max_retries` times (default 3) with a growing wait when the API doesn't
+answer, is rate limited, or answers 502, 503 or 504, as a cold or busy
+deployment can. Publishing, unpublishing and removing are retried only on 429
+and 503, the answers that say the API did nothing, so a publish that may
+already have happened is never sent twice. If a pipeline still times out
+against a slow API, raise `timeout` (or set `DATAVERSE_CONTACT_TIMEOUT`, e.g.
+`2m`); a lower `terraform apply -parallelism` also takes load off the API.
+
 ~> Every scope needs exactly one `dataversecontact_permissions_sync` resource.
 A scope with no published defaults grants nothing — every route answers
 `403 Missing required permission`, including reads.
