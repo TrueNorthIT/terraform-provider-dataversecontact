@@ -2,14 +2,17 @@ package resources
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -18,6 +21,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
@@ -258,7 +262,7 @@ func (m fieldCountFromFields) PlanModifyInt64(ctx context.Context, req planmodif
 type bindFieldFromState struct{}
 
 func (m bindFieldFromState) Description(_ context.Context) string {
-	return "Keeps the derived bind_field from state while the field's type and lookup_table are unchanged."
+	return "Plans an unset bind_field as the API will read it back."
 }
 
 func (m bindFieldFromState) MarkdownDescription(ctx context.Context) string {
@@ -266,11 +270,30 @@ func (m bindFieldFromState) MarkdownDescription(ctx context.Context) string {
 }
 
 func (m bindFieldFromState) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
-	if !req.ConfigValue.IsNull() || !req.PlanValue.IsUnknown() || req.State.Raw.IsNull() {
+	if !req.ConfigValue.IsNull() || req.State.Raw.IsNull() {
 		return
 	}
 
 	field := req.Path.ParentPath()
+	omits, diags := apiOmitsDerived(ctx, req.Private)
+	resp.Diagnostics.Append(diags...)
+	removed, diags := bindFieldRemoved(ctx, req.Private, field)
+	resp.Diagnostics.Append(diags...)
+	if removed {
+		// Taken out of config: Terraform would carry the old value forward
+		// unchanged, so the removal would never reach the API. The API reads
+		// back what it then derives, or nothing.
+		if omits {
+			resp.PlanValue = types.StringNull()
+		} else {
+			resp.PlanValue = types.StringUnknown()
+		}
+		return
+	}
+	if !req.PlanValue.IsUnknown() {
+		return
+	}
+
 	planned := map[string]types.String{}
 	unchanged := true
 	for _, name := range []string{"type", "lookup_table"} {
@@ -286,8 +309,6 @@ func (m bindFieldFromState) PlanModifyString(ctx context.Context, req planmodifi
 		}
 		planned[name] = value
 	}
-	omits, diags := apiOmitsDerived(ctx, req.Private)
-	resp.Diagnostics.Append(diags...)
 	derivable := planned["type"].ValueString() == "lookup" && !planned["lookup_table"].IsNull()
 	resp.PlanValue = plannedBindField(omits, unchanged, derivable, req.StateValue)
 }
@@ -329,6 +350,104 @@ func apiOmitsDerived(ctx context.Context, private interface {
 }) (bool, diag.Diagnostics) {
 	value, diags := private.GetKey(ctx, apiOmitsDerivedKey)
 	return string(value) == "true", diags
+}
+
+// configuredBindFieldsKey is the private state key listing the fields whose
+// bind_field the config set at the last apply.
+const configuredBindFieldsKey = "configured_bind_fields"
+
+// bindFieldRemoved reports whether the config set this field's bind_field at
+// the last apply. State from before the key existed has no list, so nothing
+// counts as removed and an upgrade plans no change.
+func bindFieldRemoved(ctx context.Context, private interface {
+	GetKey(context.Context, string) ([]byte, diag.Diagnostics)
+}, field path.Path) (bool, diag.Diagnostics) {
+	raw, diags := private.GetKey(ctx, configuredBindFieldsKey)
+	if diags.HasError() || raw == nil {
+		return false, diags
+	}
+	var names []string
+	if err := json.Unmarshal(raw, &names); err != nil {
+		return false, diags
+	}
+	key, _ := field.Steps().LastStep()
+	name, ok := key.(path.PathStepElementKeyString)
+	return ok && slices.Contains(names, string(name)), diags
+}
+
+// recordConfiguredBindFields stores which fields set bind_field in config.
+func recordConfiguredBindFields(ctx context.Context, private interface {
+	SetKey(context.Context, string, []byte) diag.Diagnostics
+}, config types.Map) diag.Diagnostics {
+	names := []string{}
+	for name, value := range config.Elements() {
+		obj, ok := value.(types.Object)
+		if !ok || obj.IsNull() || obj.IsUnknown() {
+			continue
+		}
+		if bind, ok := obj.Attributes()["bind_field"].(types.String); ok && !bind.IsNull() {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	raw, _ := json.Marshal(names)
+	return private.SetKey(ctx, configuredBindFieldsKey, raw)
+}
+
+// keepPlannedBindFields puts back, as planned, each bind_field the config
+// leaves unset that the plan knew. The plan follows what the last read said
+// about the API (plannedBindField); an instance that behaves the other way
+// can answer the apply (old and new API side by side during a deploy, or a
+// saved plan applied after a rollback) and read back something else, which
+// Terraform would fail as an inconsistent result. The next refresh reads the
+// real value, and an unchanged field keeps it without a diff.
+func keepPlannedBindFields(read, planned, config types.Map) (types.Map, diag.Diagnostics) {
+	plannedFields, configFields := planned.Elements(), config.Elements()
+	elements := map[string]attr.Value{}
+	changed := false
+	for name, value := range read.Elements() {
+		elements[name] = value
+		readObj, ok1 := value.(types.Object)
+		plannedObj, ok2 := plannedFields[name].(types.Object)
+		configObj, ok3 := configFields[name].(types.Object)
+		if !ok1 || !ok2 || !ok3 || readObj.IsNull() || plannedObj.IsNull() || configObj.IsNull() {
+			continue
+		}
+		want, _ := plannedObj.Attributes()["bind_field"].(types.String)
+		got, _ := readObj.Attributes()["bind_field"].(types.String)
+		set, _ := configObj.Attributes()["bind_field"].(types.String)
+		if !set.IsNull() || want.IsUnknown() || want.Equal(got) {
+			continue
+		}
+		attrs := readObj.Attributes()
+		attrs["bind_field"] = want
+		obj, diags := types.ObjectValue(fieldAttrTypes(), attrs)
+		if diags.HasError() {
+			return read, diags
+		}
+		elements[name] = obj
+		changed = true
+	}
+	if !changed {
+		return read, nil
+	}
+	return types.MapValue(fieldObjectType(), elements)
+}
+
+// settleBindFields finishes a Create or Update's read-back: the planned
+// bind_fields kept (keepPlannedBindFields), and the configured ones recorded.
+func settleBindFields(ctx context.Context, model *TableResourceModel, planned types.Map, config tfsdk.Config, private interface {
+	SetKey(context.Context, string, []byte) diag.Diagnostics
+}, diagnostics *diag.Diagnostics) {
+	var configured types.Map
+	diagnostics.Append(config.GetAttribute(ctx, path.Root("fields"), &configured)...)
+	if diagnostics.HasError() {
+		return
+	}
+	fields, diags := keepPlannedBindFields(model.Fields, planned, configured)
+	diagnostics.Append(diags...)
+	model.Fields = fields
+	diagnostics.Append(recordConfiguredBindFields(ctx, private, configured)...)
 }
 
 // ── Resource interface ──────────────────────────────────────────────────
@@ -547,7 +666,8 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 						},
 						"bind_field": schema.StringAttribute{
 							Description: "For aliased fields: the navigation property for @odata.bind writes. " +
-								"If omitted, the API derives it from the attribute's Dataverse SchemaName.",
+								"If omitted, the API derives it from the lookup's navigation property. An API that " +
+								"reports derived values separately (Contact API with admin GET `derived`) keeps them out of state.",
 							Optional: true,
 							Computed: true,
 							PlanModifiers: []planmodifier.String{
@@ -862,7 +982,12 @@ func (r *TableResource) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 
+	planned := plan.Fields
 	r.readIntoModel(ctx, scope, routeName, &plan, resp.Private, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	settleBindFields(ctx, &plan, planned, req.Config, resp.Private, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -918,7 +1043,12 @@ func (r *TableResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		return
 	}
 
+	planned := plan.Fields
 	r.readIntoModel(ctx, scope, routeName, &plan, resp.Private, &resp.Diagnostics)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	settleBindFields(ctx, &plan, planned, req.Config, resp.Private, &resp.Diagnostics)
 	if resp.Diagnostics.HasError() {
 		return
 	}

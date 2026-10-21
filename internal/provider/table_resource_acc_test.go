@@ -345,6 +345,125 @@ func TestAccTable_bindFieldAcrossAPIUpgrade(t *testing.T) {
 	})
 }
 
+// Taking bind_field out of config must reach the API. Terraform carries an
+// Optional+Computed value forward when config drops it, so without help the
+// removal planned no change and the override stayed.
+func TestAccTable_bindFieldRemovedFromConfig(t *testing.T) {
+	bindOf := tfjsonpath.New("fields").AtMapKey("new_siteid").AtMapKey("bind_field")
+	pinned := baseFields + `
+    new_siteid = { type = "lookup", description = "Site", lookup_table = "site", bind_field = "new_site_override" }`
+	unpinned := baseFields + `
+    new_siteid = { type = "lookup", description = "Site", lookup_table = "site" }`
+
+	for _, tc := range []struct {
+		name        string
+		omitDerived bool
+		planned     plancheck.PlanCheck
+		after       knownvalue.Check
+	}{
+		{"API omitting derived values", true, plancheck.ExpectKnownValue(caseAddress, bindOf, knownvalue.Null()), knownvalue.Null()},
+		{"older API", false, plancheck.ExpectUnknownValue(caseAddress, bindOf), knownvalue.StringExact("new_SiteId")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := fakeapi.New(t)
+			s.OmitDerived = tc.omitDerived
+			s.NavProps = map[string]string{"new_siteid": "new_SiteId"}
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+				CheckDestroy:             tablesGone(s),
+				Steps: []resource.TestStep{
+					{
+						Config: caseTable(s, pinned),
+						ConfigStateChecks: []statecheck.StateCheck{
+							statecheck.ExpectKnownValue(caseAddress, bindOf, knownvalue.StringExact("new_site_override")),
+						},
+					},
+					{
+						Config: caseTable(s, unpinned),
+						ConfigPlanChecks: resource.ConfigPlanChecks{
+							PreApply: []plancheck.PlanCheck{
+								plancheck.ExpectResourceAction(caseAddress, plancheck.ResourceActionUpdate),
+								tc.planned,
+							},
+						},
+						ConfigStateChecks: []statecheck.StateCheck{
+							statecheck.ExpectKnownValue(caseAddress, bindOf, tc.after),
+						},
+						Check: func(*terraform.State) error {
+							f := s.Table("default", "case")["fields"].(map[string]any)["new_siteid"].(map[string]any)
+							if f["bindField"] != "new_SiteId" {
+								return fmt.Errorf("stored bindField = %v, want the derived new_SiteId", f["bindField"])
+							}
+							return nil
+						},
+					},
+				},
+			})
+		})
+	}
+}
+
+// An API rolled back to an older image: the next refresh records it, and the
+// older rules apply from there (#30's unknown included).
+func TestAccTable_bindFieldAPIRolledBack(t *testing.T) {
+	s := fakeapi.New(t)
+	s.OmitDerived = true
+
+	lookups := baseFields + `
+    customerid = { type = "lookup", description = "Customer", lookup_table = "contact" }`
+	bindOf := tfjsonpath.New("fields").AtMapKey("customerid").AtMapKey("bind_field")
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             tablesGone(s),
+		Steps: []resource.TestStep{
+			{Config: caseTable(s, lookups)},
+			{
+				PreConfig: func() {
+					s.SetOmitDerived(false)
+					s.SetNavProps(map[string]string{"customerid": "customerid_contact"})
+				},
+				Config: caseTable(s, lookups+`
+    description = { type = "string", description = "Details" }`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectUnknownValue(caseAddress, bindOf)},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, bindOf, knownvalue.StringExact("customerid_contact")),
+				},
+			},
+		},
+	})
+}
+
+// The plan follows what the last read said about the API, but an instance
+// that behaves the other way can answer the apply: old and new side by side
+// during a deploy. The apply must still succeed, and the next plan be clean.
+func TestAccTable_bindFieldAPIChangesDuringApply(t *testing.T) {
+	s := fakeapi.New(t)
+	s.OmitDerived = true
+	s.NavProps = map[string]string{"customerid": "customerid_contact"}
+
+	lookups := baseFields + `
+    customerid = { type = "lookup", description = "Customer", lookup_table = "contact" }`
+	bindOf := tfjsonpath.New("fields").AtMapKey("customerid").AtMapKey("bind_field")
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             tablesGone(s),
+		Steps: []resource.TestStep{
+			{Config: caseTable(s, lookups)},
+			{
+				// Planned against the new API; saved by an older instance.
+				PreConfig: func() { s.SetOnTableSave(func(s *fakeapi.Server) { s.OmitDerived = false }) },
+				Config: caseTable(s, lookups+`
+    description = { type = "string", description = "Details" }`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectKnownValue(caseAddress, bindOf, knownvalue.Null())},
+				},
+			},
+		},
+	})
+}
+
 // #17: validation findings are objects. Any save that drew a warning failed
 // to decode.
 func TestAccTable_validationWarnings(t *testing.T) {

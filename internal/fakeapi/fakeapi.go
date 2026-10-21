@@ -73,6 +73,12 @@ type Server struct {
 	// instead of publishing that route.
 	PublishErrors map[string]string
 
+	// OnTableSave runs as a table draft is saved, before the fake rewrites
+	// it, with the server's lock held: it may set fields directly but must
+	// not call methods that lock. For an API whose behaviour changes during
+	// an apply (old and new instances side by side during a deploy).
+	OnTableSave func(s *Server)
+
 	// Fail makes requests answer with a status code instead, keyed by method
 	// and the path after the scope, e.g. "PUT table-manager/case" or
 	// "GET scopes". For the error paths a failed apply, refresh or destroy
@@ -174,6 +180,13 @@ func (s *Server) ClearFail() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Fail = nil
+}
+
+// SetOnTableSave sets OnTableSave between steps.
+func (s *Server) SetOnTableSave(hook func(s *Server)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.OnTableSave = hook
 }
 
 // SetOmitDerived switches OmitDerived between steps, for an API upgraded
@@ -393,6 +406,9 @@ func (s *Server) item(w http.ResponseWriter, method, scope, name string, body ma
 				return
 			}
 			resp["validation"] = s.validateAndStrip(body)
+			if s.OnTableSave != nil {
+				s.OnTableSave(s)
+			}
 			s.enrichBindFields(body)
 		}
 		put(k.drafts, scope, name, body)

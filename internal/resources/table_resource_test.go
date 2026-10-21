@@ -70,6 +70,10 @@ func TestFieldCountFromFields(t *testing.T) {
 // TestBindFieldFromState verifies an unset bind_field keeps its derived value
 // only while the field is unchanged, so lookups without bind_field don't fail
 // apply (#8) and unchanged fields don't show "(known after apply)".
+//
+// These requests carry no private state (the framework's type is internal),
+// so they take the older-API branch. TestPlannedBindField covers both, and the
+// TestAccTable_bindField* acceptance tests cover the private state itself.
 func TestBindFieldFromState(t *testing.T) {
 	ctx := context.Background()
 
