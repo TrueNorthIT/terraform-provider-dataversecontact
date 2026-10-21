@@ -37,6 +37,15 @@ type Issue struct {
 	Message  string `json:"message"`
 }
 
+// RuleFinding is one config-rule finding, in the API's ConfigFinding shape.
+type RuleFinding struct {
+	Rule     string `json:"rule"`
+	Severity string `json:"severity"`
+	Subject  string `json:"subject"`
+	Route    string `json:"route"`
+	Message  string `json:"message"`
+}
+
 // Server is a running fake. Configure its behaviour fields before the
 // Terraform step that needs them; all methods are safe for concurrent use.
 type Server struct {
@@ -50,6 +59,12 @@ type Server struct {
 	// enrichLookupBindFields does.
 	NavProps map[string]string
 
+	// OmitDerived makes the fake behave like Contact API #465 and later: a
+	// bindField it derives is marked, left out of the schema a GET returns,
+	// and reported beside it under "derived". Off, it behaves like older
+	// APIs, which return derived values inside the schema.
+	OmitDerived bool
+
 	// UnknownColumns lists, per Dataverse logical name, columns the table does
 	// not have. Saving a schema that declares one reports FIELD_NOT_FOUND and
 	// strips the field, as the API does.
@@ -59,6 +74,10 @@ type Server struct {
 	// publish.
 	Warnings []Issue
 
+	// RuleWarnings are returned as config-rule warnings (the top-level
+	// "warnings" of the response) on every table save.
+	RuleWarnings []RuleFinding
+
 	// PolymorphicTargets lists, per polymorphic lookup field, the target
 	// entities the API would derive expands for on read.
 	PolymorphicTargets map[string][]string
@@ -66,6 +85,12 @@ type Server struct {
 	// PublishErrors makes a publish report a per-route error (with a 200)
 	// instead of publishing that route.
 	PublishErrors map[string]string
+
+	// OnTableSave runs as a table draft is saved, before the fake rewrites
+	// it, with the server's lock held: it may set fields directly but must
+	// not call methods that lock. For an API whose behaviour changes during
+	// an apply (old and new instances side by side during a deploy).
+	OnTableSave func(s *Server)
 
 	// Fail makes requests answer with a status code instead, keyed by method
 	// and the path after the scope, e.g. "PUT table-manager/case" or
@@ -168,6 +193,30 @@ func (s *Server) ClearFail() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Fail = nil
+}
+
+// SetOnTableSave sets OnTableSave between steps.
+func (s *Server) SetOnTableSave(hook func(s *Server)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.OnTableSave = hook
+}
+
+// SetOmitDerived switches OmitDerived between steps, for an API upgraded
+// under existing state; set OmitDerived directly only before the first.
+func (s *Server) SetOmitDerived(omit bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.OmitDerived = omit
+}
+
+// SetNavProps replaces NavProps. Use it between steps, for an API that only
+// starts deriving bindField after a table was first saved; set NavProps
+// directly only before the first.
+func (s *Server) SetNavProps(navProps map[string]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.NavProps = navProps
 }
 
 // SeedTable publishes a schema directly, as if it was built outside
@@ -329,11 +378,15 @@ func (s *Server) item(w http.ResponseWriter, method, scope, name string, body ma
 	switch method {
 	case http.MethodGet:
 		if draft := k.drafts[scope][name]; draft != nil {
-			writeJSON(w, http.StatusOK, map[string]any{
+			resp := map[string]any{
 				"source": "draft",
 				"draft":  draftEntry(scope, name, draft, "modified"),
 				"schema": draft,
-			})
+			}
+			if k.isTable() {
+				resp["schema"] = s.withoutDerived(clone(draft), resp)
+			}
+			writeJSON(w, http.StatusOK, resp)
 			return
 		}
 		published := k.published[scope][name]
@@ -342,10 +395,13 @@ func (s *Server) item(w http.ResponseWriter, method, scope, name string, body ma
 			return
 		}
 		schema := clone(published)
+		resp := map[string]any{"source": k.publishedSource, "draft": nil}
 		if k.isTable() {
 			s.deriveExpands(schema)
+			schema = s.withoutDerived(schema, resp)
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"source": k.publishedSource, "draft": nil, "schema": schema})
+		resp["schema"] = schema
+		writeJSON(w, http.StatusOK, resp)
 
 	case http.MethodPut:
 		if body == nil || body["routeName"] != name {
@@ -363,6 +419,12 @@ func (s *Server) item(w http.ResponseWriter, method, scope, name string, body ma
 				return
 			}
 			resp["validation"] = s.validateAndStrip(body)
+			if len(s.RuleWarnings) > 0 {
+				resp["warnings"] = s.RuleWarnings
+			}
+			if s.OnTableSave != nil {
+				s.OnTableSave(s)
+			}
 			s.enrichBindFields(body)
 		}
 		put(k.drafts, scope, name, body)
@@ -504,23 +566,38 @@ func (s *Server) customApiDefinitions(w http.ResponseWriter, scope string) {
 
 // ── The API's schema rewrites ──────────────────────────────────────────
 
-// validateAndStrip reports FIELD_NOT_FOUND for every declared column the
-// table lacks and deletes it from the schema — what the API's PUT does.
+// validateAndStrip deletes every declared column the table lacks from fields,
+// defaultSelect and lookupSearchContains, as the API's draft PUT does with
+// the columns its validation reports as FIELD_NOT_FOUND.
+//
+// The API then validates what is left and answers with THAT result, so
+// FIELD_NOT_FOUND never reaches the response: the only sign of a strip is the
+// field missing from the saved draft. lookupFields isn't stripped, so a
+// stripped column listed there comes back as LOOKUP_FIELD_UNKNOWN, which is
+// the structural check this re-validation repeats.
 func (s *Server) validateAndStrip(schema map[string]any) map[string]any {
 	logical, _ := schema["dataverseLogicalName"].(string)
 	fields, _ := schema["fields"].(map[string]any)
-	var errors []Issue
 	for _, col := range s.UnknownColumns[logical] {
 		if _, declared := fields[col]; !declared {
 			continue
 		}
-		errors = append(errors, Issue{
-			Severity: "error", Field: "fields." + col, Code: "FIELD_NOT_FOUND",
-			Message: fmt.Sprintf("Field %q does not exist on %s", col, logical),
-		})
 		delete(fields, col)
-		if sel, ok := schema["defaultSelect"].([]any); ok {
-			schema["defaultSelect"] = without(sel, col)
+		for _, key := range []string{"defaultSelect", "lookupSearchContains"} {
+			if list, ok := schema[key].([]any); ok {
+				schema[key] = without(list, col)
+			}
+		}
+	}
+	var errors []Issue
+	lookups, _ := schema["lookupFields"].([]any)
+	for _, raw := range lookups {
+		name, _ := raw.(string)
+		if _, declared := fields[name]; !declared {
+			errors = append(errors, Issue{
+				Severity: "error", Field: "lookupFields." + name, Code: "LOOKUP_FIELD_UNKNOWN",
+				Message: fmt.Sprintf("Field %q in lookupFields is not defined in fields", name),
+			})
 		}
 	}
 	return s.validation(errors)
@@ -544,13 +621,46 @@ func (s *Server) enrichBindFields(schema map[string]any) {
 	fields, _ := schema["fields"].(map[string]any)
 	for name, raw := range fields {
 		f, _ := raw.(map[string]any)
-		if f == nil || f["type"] != "lookup" || f["lookupTable"] == nil || f["bindField"] != nil {
+		if f == nil {
+			continue
+		}
+		// Derived, never authored: work it out again.
+		if s.OmitDerived && f["bindFieldDerived"] == true {
+			delete(f, "bindField")
+			delete(f, "bindFieldDerived")
+		}
+		if f["type"] != "lookup" || f["lookupTable"] == nil || f["bindField"] != nil {
 			continue
 		}
 		if nav, ok := s.NavProps[name]; ok && nav != name {
 			f["bindField"] = nav
+			if s.OmitDerived {
+				f["bindFieldDerived"] = true
+			}
 		}
 	}
+}
+
+// withoutDerived is the API's withoutDerivedState for bindField: with
+// OmitDerived, it takes marked bindFields out of the schema and reports them
+// in resp["derived"]. Without it, the schema is returned as stored.
+func (s *Server) withoutDerived(schema map[string]any, resp map[string]any) map[string]any {
+	if !s.OmitDerived {
+		return schema
+	}
+	bindFields := map[string]any{}
+	fields, _ := schema["fields"].(map[string]any)
+	for name, raw := range fields {
+		f, _ := raw.(map[string]any)
+		if f == nil || f["bindFieldDerived"] != true {
+			continue
+		}
+		bindFields[name] = f["bindField"]
+		delete(f, "bindField")
+		delete(f, "bindFieldDerived")
+	}
+	resp["derived"] = map[string]any{"bindFields": bindFields}
+	return schema
 }
 
 // deriveExpands adds the `<field>_<target>` expands the API derives onto a

@@ -3,6 +3,7 @@ package provider
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -85,6 +86,26 @@ func TestAccCustomApi_createUpdateImportDestroy(t *testing.T) {
 				ImportStateVerify: true,
 			},
 		},
+	})
+}
+
+// A publish that reports a per-route error has published nothing, and the
+// draft is discarded.
+func TestAccCustomApi_publishRouteErrorFails(t *testing.T) {
+	s := fakeapi.New(t)
+	s.PublishErrors = map[string]string{"expand-calendar": "Draft blob not found"}
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy: func(*terraform.State) error {
+			if n := s.ApiCount("default"); n != 0 {
+				return fmt.Errorf("%d custom API(s) or draft(s) left behind", n)
+			}
+			return nil
+		},
+		Steps: []resource.TestStep{{
+			Config:      calendarApi(s, "Expands a calendar"),
+			ExpectError: regexp.MustCompile(`error\s+publishing\s+"expand-calendar",\s+so\s+it\s+may\s+not\s+have\s+been\s+published:\s+Draft\s+blob\s+not\s+found`),
+		}},
 	})
 }
 

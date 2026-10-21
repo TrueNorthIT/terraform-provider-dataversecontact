@@ -55,10 +55,19 @@ jobs:
         with:
           terraform_wrapper: false
       - run: go mod download
+      # A real portal config, applied against the fake API by
+      # TestAccRealConfigs like the examples. Only public configs belong here:
+      # this repo's Actions logs are public.
+      - uses: actions/checkout@v4
+        with:
+          repository: TrueNorthIT/dataverse-rcportal-terraform
+          path: .real-configs/dataverse-rcportal-terraform
       - run: >-
           go test ./... -v -timeout 30m
           -coverpkg=./internal/client/...,./internal/resources/...,./internal/datasources/...,./internal/provider/...
           -coverprofile=coverage.out
+        env:
+          DATAVERSE_TF_CONFIG_DIRS: ${{ github.workspace }}/.real-configs/dataverse-rcportal-terraform
       # Provider code only; the test fake is excluded above.
       - name: Coverage at least 90%
         run: |

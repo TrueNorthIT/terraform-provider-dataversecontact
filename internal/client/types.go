@@ -49,6 +49,15 @@ type TableManagerResponse struct {
 	Source string          `json:"source"`
 	Draft  *DraftInfo      `json:"draft"`
 	Schema json.RawMessage `json:"schema"`
+	// Derived is what the API filled in on save and left out of Schema
+	// (Contact API #465). An older API answers without it and returns derived
+	// values inside Schema, as if they had been written.
+	Derived *DerivedState `json:"derived,omitempty"`
+}
+
+// DerivedState is what an admin table GET reports beside the schema.
+type DerivedState struct {
+	BindFields map[string]string `json:"bindFields"`
 }
 
 // SaveDraftResponse is the response from PUT /table-manager/{table}.
@@ -56,6 +65,18 @@ type SaveDraftResponse struct {
 	Message    string          `json:"message"`
 	Draft      *DraftInfo      `json:"draft"`
 	Validation *ValidationInfo `json:"validation,omitempty"`
+	// Warnings are the API's config-rule warnings: saved, but worth fixing.
+	Warnings []ConfigFinding `json:"warnings,omitempty"`
+}
+
+// ConfigFinding is one config-rule finding. A save is refused (400) on an
+// error, so a saved draft only ever carries warnings.
+type ConfigFinding struct {
+	Rule     string  `json:"rule"`
+	Severity string  `json:"severity"`
+	Subject  string  `json:"subject"`
+	Route    *string `json:"route"`
+	Message  string  `json:"message"`
 }
 
 // ValidationInfo represents validation results.
@@ -164,6 +185,8 @@ type CustomApiManagerResponse struct {
 type CustomApiSaveDraftResponse struct {
 	Message string     `json:"message"`
 	Draft   *DraftInfo `json:"draft"`
+	// Warnings are the API's config-rule warnings, as for tables.
+	Warnings []ConfigFinding `json:"warnings,omitempty"`
 }
 
 // CustomApiPublishRequest is the request body for POST /custom-api-manager/publish.

@@ -70,6 +70,10 @@ func TestFieldCountFromFields(t *testing.T) {
 // TestBindFieldFromState verifies an unset bind_field keeps its derived value
 // only while the field is unchanged, so lookups without bind_field don't fail
 // apply (#8) and unchanged fields don't show "(known after apply)".
+//
+// These requests carry no private state (the framework's type is internal),
+// so they take the older-API branch. TestPlannedBindField covers both, and the
+// TestAccTable_bindField* acceptance tests cover the private state itself.
 func TestBindFieldFromState(t *testing.T) {
 	ctx := context.Background()
 
@@ -102,31 +106,43 @@ func TestBindFieldFromState(t *testing.T) {
 	}
 
 	prior := withFields(map[string]tftypes.Value{"abc_project": field("lookup", "project")})
+	derived := types.StringValue("abc_Project")
 	cases := []struct {
-		name   string
-		state  tftypes.Value
-		plan   tftypes.Value
-		config types.String
-		want   types.String
+		name       string
+		state      tftypes.Value
+		plan       tftypes.Value
+		config     types.String
+		stateValue types.String
+		want       types.String
 	}{
 		{"unchanged field", prior,
 			withFields(map[string]tftypes.Value{"abc_project": field("lookup", "project")}),
-			types.StringNull(), types.StringValue("abc_Project")},
+			types.StringNull(), derived, derived},
 		{"lookup_table changed", prior,
 			withFields(map[string]tftypes.Value{"abc_project": field("lookup", "programme")}),
-			types.StringNull(), types.StringUnknown()},
+			types.StringNull(), derived, types.StringUnknown()},
 		{"type changed", prior,
 			withFields(map[string]tftypes.Value{"abc_project": field("string", "")}),
-			types.StringNull(), types.StringUnknown()},
+			types.StringNull(), derived, types.StringUnknown()},
 		{"new field", prior,
 			withFields(map[string]tftypes.Value{"abc_other": field("lookup", "project")}),
-			types.StringNull(), types.StringUnknown()},
+			types.StringNull(), types.StringNull(), types.StringUnknown()},
 		{"create", tftypes.NewValue(objType, nil),
 			withFields(map[string]tftypes.Value{"abc_project": field("lookup", "project")}),
-			types.StringNull(), types.StringUnknown()},
+			types.StringNull(), types.StringNull(), types.StringUnknown()},
 		{"configured", prior,
 			withFields(map[string]tftypes.Value{"abc_project": field("lookup", "project")}),
-			types.StringValue("abc_Custom"), types.StringValue("abc_Custom")},
+			types.StringValue("abc_Custom"), derived, types.StringValue("abc_Custom")},
+		// #30: the API can still derive a bind_field for a lookup that has none.
+		{"lookup not derived yet", prior,
+			withFields(map[string]tftypes.Value{"abc_project": field("lookup", "project")}),
+			types.StringNull(), types.StringNull(), types.StringUnknown()},
+		{"lookup without lookup_table", withFields(map[string]tftypes.Value{"abc_project": field("lookup", "")}),
+			withFields(map[string]tftypes.Value{"abc_project": field("lookup", "")}),
+			types.StringNull(), types.StringNull(), types.StringNull()},
+		{"not a lookup", withFields(map[string]tftypes.Value{"abc_project": field("string", "")}),
+			withFields(map[string]tftypes.Value{"abc_project": field("string", "")}),
+			types.StringNull(), types.StringNull(), types.StringNull()},
 	}
 
 	for _, tc := range cases {
@@ -140,12 +156,11 @@ func TestBindFieldFromState(t *testing.T) {
 				Plan:        tfsdk.Plan{Schema: s, Raw: tc.plan},
 				State:       tfsdk.State{Schema: s, Raw: tc.state},
 				ConfigValue: tc.config,
-				StateValue:  types.StringValue("abc_Project"),
+				StateValue:  tc.stateValue,
 				PlanValue:   planValue,
 			}
 			if tc.name == "new field" {
 				req.Path = path.Root("fields").AtMapKey("abc_other").AtName("bind_field")
-				req.StateValue = types.StringNull()
 			}
 			resp := &planmodifier.StringResponse{PlanValue: req.PlanValue}
 			bindFieldFromState{}.PlanModifyString(ctx, req, resp)
@@ -154,6 +169,33 @@ func TestBindFieldFromState(t *testing.T) {
 			}
 			if !resp.PlanValue.Equal(tc.want) {
 				t.Errorf("planned %s, want %s", resp.PlanValue, tc.want)
+			}
+		})
+	}
+}
+
+// TestPlannedBindField pins what an unset bind_field is planned as, against
+// an API that keeps derived values out of the schema (Contact API #465) and
+// an older one that returns them inside it.
+func TestPlannedBindField(t *testing.T) {
+	prior := types.StringValue("abc_Project")
+	cases := []struct {
+		name                        string
+		omits, unchanged, derivable bool
+		prior, want                 types.String
+	}{
+		{"omits: unchanged field keeps what it sends again", true, true, true, prior, prior},
+		{"omits: nothing derived comes back", true, true, true, types.StringNull(), types.StringNull()},
+		{"omits: a changed field reads back as sent", true, false, true, prior, types.StringNull()},
+		{"older: unchanged field keeps its derived value", false, true, true, prior, prior},
+		{"older: a changed field is derived again", false, false, true, prior, types.StringUnknown()},
+		{"older: a lookup it hasn't derived for yet may be (#30)", false, true, true, types.StringNull(), types.StringUnknown()},
+		{"older: a field it never derives for stays null", false, true, false, types.StringNull(), types.StringNull()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := plannedBindField(tc.omits, tc.unchanged, tc.derivable, tc.prior); !got.Equal(tc.want) {
+				t.Errorf("planned %s, want %s", got, tc.want)
 			}
 		})
 	}
