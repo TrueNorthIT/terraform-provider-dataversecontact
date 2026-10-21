@@ -113,8 +113,8 @@ func TestSaveAndPublishTable(t *testing.T) {
 	if callCount != 2 {
 		t.Errorf("expected 2 API calls (save + publish), got %d", callCount)
 	}
-	if len(resp.Published) != 1 || resp.Published[0] != "case" {
-		t.Errorf("expected published=[case], got %v", resp.Published)
+	if resp.Draft == nil || resp.Draft.RouteName != "case" {
+		t.Errorf("expected the save response for case, got %+v", resp)
 	}
 }
 

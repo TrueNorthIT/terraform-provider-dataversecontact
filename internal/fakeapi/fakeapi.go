@@ -37,6 +37,15 @@ type Issue struct {
 	Message  string `json:"message"`
 }
 
+// RuleFinding is one config-rule finding, in the API's ConfigFinding shape.
+type RuleFinding struct {
+	Rule     string `json:"rule"`
+	Severity string `json:"severity"`
+	Subject  string `json:"subject"`
+	Route    string `json:"route"`
+	Message  string `json:"message"`
+}
+
 // Server is a running fake. Configure its behaviour fields before the
 // Terraform step that needs them; all methods are safe for concurrent use.
 type Server struct {
@@ -58,6 +67,10 @@ type Server struct {
 	// Warnings are returned as validation warnings on every table save and
 	// publish.
 	Warnings []Issue
+
+	// RuleWarnings are returned as config-rule warnings (the top-level
+	// "warnings" of the response) on every table save.
+	RuleWarnings []RuleFinding
 
 	// PolymorphicTargets lists, per polymorphic lookup field, the target
 	// entities the API would derive expands for on read.
@@ -363,6 +376,9 @@ func (s *Server) item(w http.ResponseWriter, method, scope, name string, body ma
 				return
 			}
 			resp["validation"] = s.validateAndStrip(body)
+			if len(s.RuleWarnings) > 0 {
+				resp["warnings"] = s.RuleWarnings
+			}
 			s.enrichBindFields(body)
 		}
 		put(k.drafts, scope, name, body)

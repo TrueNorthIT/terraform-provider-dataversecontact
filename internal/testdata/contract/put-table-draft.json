@@ -26,5 +26,14 @@
         "message": "Field \"prioritycode\" is declared as string but Dataverse type is Picklist"
       }
     ]
-  }
+  },
+  "warnings": [
+    {
+      "rule": "me-only-route-name",
+      "severity": "warning",
+      "subject": "table",
+      "route": "case",
+      "message": "\"companies\" is also a built-in /me endpoint, so this table answers on /team and /all but not on /me."
+    }
+  ]
 }

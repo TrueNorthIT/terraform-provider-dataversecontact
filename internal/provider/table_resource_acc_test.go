@@ -393,38 +393,83 @@ func TestAccTable_validateConfig(t *testing.T) {
 	})
 }
 
-// ── Known gaps ─────────────────────────────────────────────────────────
-// These describe what should happen and fail today. Remove the Skip once the
-// provider is fixed.
+// ── Saves the API only half carries out ────────────────────────────────
+// The API answers both of these with a 200. Each must fail the apply, publish
+// nothing the config didn't ask for, and leave no draft behind: the table GET
+// returns a draft in preference to the published table, so a stray one would
+// be read back as if it were live.
 
-// A 200 publish that reports a per-route error has not published anything,
-// but the provider ignores PublishResponse.Errors and records success.
+// A publish that reports a per-route error has published nothing.
 func TestAccTable_publishRouteErrorFails(t *testing.T) {
-	t.Skip("known gap: SaveAndPublishTable ignores PublishResponse.Errors")
 	s := fakeapi.New(t)
 	s.PublishErrors = map[string]string{"case": "Draft blob not found"}
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             tablesGone(s),
 		Steps: []resource.TestStep{{
 			Config:      caseTable(s, baseFields),
-			ExpectError: regexp.MustCompile(`Draft blob not found`),
+			ExpectError: regexp.MustCompile(`could not\s+publish\s+"case":\s+Draft\s+blob\s+not\s+found`),
 		}},
 	})
 }
 
+const typoFields = baseFields + `
+    new_typo = { type = "string", description = "Misspelt" }`
+
 // The API strips fields Dataverse doesn't have (FIELD_NOT_FOUND) on save.
-// The provider ignores the validation result, so the apply fails with
-// Terraform's generic "inconsistent result" instead of naming the column.
+// The apply must name the column, and must not publish the stripped table.
 func TestAccTable_unknownColumnNamed(t *testing.T) {
-	t.Skip("known gap: save validation errors are not surfaced as diagnostics")
 	s := fakeapi.New(t)
 	s.UnknownColumns = map[string][]string{"incident": {"new_typo"}}
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy: func(state *terraform.State) error {
+			for _, r := range s.Requests() {
+				if strings.HasSuffix(r, "/publish") {
+					return fmt.Errorf("a table with a stripped field was published: %s", r)
+				}
+			}
+			return tablesGone(s)(state)
+		},
 		Steps: []resource.TestStep{{
-			Config: caseTable(s, baseFields+`
-    new_typo = { type = "string", description = "Misspelt" }`),
-			ExpectError: regexp.MustCompile(`new_typo`),
+			Config:      caseTable(s, typoFields),
+			ExpectError: regexp.MustCompile(`Field not in Dataverse(?s:.*)"new_typo"\s+does\s+not\s+exist\s+on\s+incident`),
 		}},
+	})
+}
+
+// On an update, the table stays published as it was and state keeps the old
+// config, so the change is still offered on the next plan.
+func TestAccTable_unknownColumnOnUpdateKeepsPublished(t *testing.T) {
+	s := fakeapi.New(t)
+	s.UnknownColumns = map[string][]string{"incident": {"new_typo"}}
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             tablesGone(s),
+		Steps: []resource.TestStep{
+			{Config: caseTable(s, baseFields)},
+			{
+				Config:      caseTable(s, typoFields),
+				ExpectError: regexp.MustCompile(`new_typo`),
+			},
+			{
+				Config:             caseTable(s, typoFields),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+			{
+				// Back to the published config: nothing to do, and no draft left.
+				Config: caseTable(s, baseFields),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+				Check: func(*terraform.State) error {
+					if n := s.TableCount("default"); n != 1 {
+						return fmt.Errorf("want the one published table, found %d tables and drafts", n)
+					}
+					return nil
+				},
+			},
+		},
 	})
 }

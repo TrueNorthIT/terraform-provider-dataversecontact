@@ -21,7 +21,7 @@ nested shapes are covered:
 
 | Fixture | Handler |
 |---|---|
-| `put-table-draft` | `server/handlers/admin.ts`, PUT branch of the table-manager handler. `validation` is `ValidationResult` in `server/services/discover/types.ts` |
+| `put-table-draft` | `server/handlers/admin.ts`, PUT branch of the table-manager handler. `validation` is `ValidationResult` in `server/services/discover/types.ts`; `warnings` are `ConfigFinding`s from `server/config/scopes/config-rules.ts` |
 | `post-table-publish` | `server/handlers/admin.ts`, publish handler (`PublishResult` in `server/services/draft-lifecycle.ts`, plus `validation`) |
 | `post-table-unpublish`, `post-table-remove`, `post-custom-api-remove` | `createBatchActionHandler` in `server/handlers/admin-shared.ts` |
 | `delete-table-recycled` | `createSingleItemHandler` in `server/handlers/admin-shared.ts` |
