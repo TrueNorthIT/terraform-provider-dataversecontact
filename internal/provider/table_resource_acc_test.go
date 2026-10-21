@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -573,6 +574,11 @@ func TestAccTable_everyAttribute(t *testing.T) {
     folder     = "Public"
     columns    = { ShowOnPortal = "boolean", DocType = "string" }
     filters    = ["ShowOnPortal eq true", "name endswith .pdf"]
+    upload {
+      max_bytes  = 1048576
+      extensions = ["pdf"]
+      columns    = { ShowOnPortal = "true", DocType = "Citizen upload" }
+    }
   }
 
   expand {
@@ -755,6 +761,100 @@ func TestAccTable_validateConfig(t *testing.T) {
   }`),
 				ExpectError: regexp.MustCompile(`at\s+least\s+1`),
 			},
+			// documents.upload, as the API's contract (1.35.0) would refuse it.
+			{
+				Config: caseTable(s, baseFields, `
+  documents {
+    permission = "casedocuments"
+    upload {
+      columns = { ShowOnPortal = "true" }
+    }
+  }`),
+				ExpectError: regexp.MustCompile(`"ShowOnPortal"\s+isn't\s+declared\s+in\s+documents.columns`),
+			},
+			{
+				Config: caseTable(s, baseFields, `
+  documents {
+    permission = "casedocuments"
+    columns    = { ShowOnPortal = "boolean" }
+    upload {
+      columns = { ShowOnPortal = "yes" }
+    }
+  }`),
+				ExpectError: regexp.MustCompile(`"yes"\s+isn't\s+a\s+boolean`),
+			},
+			{
+				Config: caseTable(s, baseFields, `
+  documents {
+    permission = "casedocuments"
+    columns    = { Rank = "number" }
+    upload {
+      columns = { Rank = "first" }
+    }
+  }`),
+				ExpectError: regexp.MustCompile(`"first"\s+isn't\s+a\s+number`),
+			},
+			{
+				Config: caseTable(s, baseFields, `
+  documents {
+    permission = "casedocuments"
+    upload {
+      max_bytes = 0
+    }
+  }`),
+				ExpectError: regexp.MustCompile(`at\s+least\s+1`),
+			},
+			{
+				Config: caseTable(s, baseFields, `
+  documents {
+    permission = "casedocuments"
+    upload {
+      extensions = [".PDF"]
+    }
+  }`),
+				ExpectError: regexp.MustCompile(`lower\s+case,\s+without\s+the\s+dot`),
+			},
+			{
+				Config: caseTable(s, baseFields, `
+  documents {
+    permission = "casedocuments"
+    upload {
+      extensions = ["pdf", "exe"]
+    }
+  }`),
+				ExpectError: regexp.MustCompile(`"exe"\s+is\s+an\s+executable\s+type`),
+			},
+			{
+				Config: caseTable(s, baseFields, `
+  documents {
+    permission = "casedocuments"
+    upload {
+      extensions = ["pdf", "pdf"]
+    }
+  }`),
+				ExpectError: regexp.MustCompile(`Duplicate\s+List\s+Value`),
+			},
+			{
+				Config: caseTable(s, baseFields, `
+  documents {
+    permission = "casedocuments"
+    upload {
+      extensions = []
+    }
+  }`),
+				ExpectError: regexp.MustCompile(`at\s+least\s+1`),
+			},
+			{
+				Config: caseTable(s, baseFields, `
+  documents {
+    permission = "casedocuments"
+    columns    = { ShowOnPortal = "boolean" }
+    upload {
+      columns = {}
+    }
+  }`),
+				ExpectError: regexp.MustCompile(`at\s+least\s+1`),
+			},
 		},
 	})
 }
@@ -876,6 +976,156 @@ func TestAccTable_documents(t *testing.T) {
 				Check:  published(nil),
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("documents"), knownvalue.Null()),
+				},
+			},
+		},
+	})
+}
+
+// documents.upload over its life. A documents block without upload publishes
+// no upload key and plans clean even when the API spells the absence as null;
+// upload {} is sent as {} and plans clean; fixed column values go out typed by
+// their declared type and read back as the strings the config wrote, also
+// when the API holds them as strings or re-spells a number; each optional
+// attribute is sent only when set; and removing the block removes the key.
+func TestAccTable_documentsUpload(t *testing.T) {
+	s := fakeapi.New(t)
+	documents := func(upload string) string {
+		return `
+  documents {
+    permission = "casedocuments"
+    columns    = { ShowOnPortal = "boolean", Rank = "number" }
+    filters    = ["ShowOnPortal eq true"]` + upload + `
+  }`
+	}
+	upload := func(body string) string { return "\n    upload {\n" + body + "\n    }" }
+
+	uploadPath := tfjsonpath.New("documents").AtMapKey("upload")
+	// published compares the stored upload by value and JSON type, so true
+	// and "true" differ. nil wants no upload key.
+	published := func(want map[string]any) resource.TestCheckFunc {
+		return func(*terraform.State) error {
+			documents, _ := s.Table("default", "case")["documents"].(map[string]any)
+			if documents == nil {
+				return fmt.Errorf("documents not published")
+			}
+			got, ok := documents["upload"]
+			switch {
+			case want == nil && ok:
+				return fmt.Errorf("upload published without a block: %#v", got)
+			case want != nil && !reflect.DeepEqual(got, want):
+				return fmt.Errorf("published upload = %#v, want %#v", got, want)
+			}
+			return nil
+		}
+	}
+	emptyPlan := resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()}}
+	update := resource.ConfigPlanChecks{
+		PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(caseAddress, plancheck.ResourceActionUpdate)},
+	}
+	full := upload(`      max_bytes  = 1048576
+      extensions = ["pdf", "png"]
+      columns    = { ShowOnPortal = "true", Rank = "4" }`)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             tablesGone(s),
+		Steps: []resource.TestStep{
+			{
+				Config: caseTable(s, baseFields, documents("")),
+				Check:  published(nil),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, uploadPath, knownvalue.Null()),
+				},
+			},
+			{
+				// The published hint spells "no upload" as null.
+				PreConfig: func() {
+					s.EditTable("default", "case", func(m map[string]any) { m["documents"].(map[string]any)["upload"] = nil })
+				},
+				Config:           caseTable(s, baseFields, documents("")),
+				ConfigPlanChecks: emptyPlan,
+			},
+			{
+				// Upload with the API's defaults.
+				Config:           caseTable(s, baseFields, documents("\n    upload {}")),
+				ConfigPlanChecks: update,
+				Check:            published(map[string]any{}),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, uploadPath, knownvalue.ObjectExact(map[string]knownvalue.Check{
+						"max_bytes":  knownvalue.Null(),
+						"extensions": knownvalue.Null(),
+						"columns":    knownvalue.Null(),
+					})),
+				},
+			},
+			{
+				Config:           caseTable(s, baseFields, documents(full)),
+				ConfigPlanChecks: update,
+				Check: published(map[string]any{
+					"maxBytes":   float64(1048576),
+					"extensions": []any{"pdf", "png"},
+					"columns":    map[string]any{"ShowOnPortal": true, "Rank": float64(4)},
+				}),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, uploadPath.AtMapKey("columns"), knownvalue.MapExact(map[string]knownvalue.Check{
+						"ShowOnPortal": knownvalue.StringExact("true"),
+						"Rank":         knownvalue.StringExact("4"),
+					})),
+					statecheck.ExpectKnownValue(caseAddress, uploadPath.AtMapKey("max_bytes"), knownvalue.Int64Exact(1048576)),
+				},
+			},
+			{
+				// The API keeps the number, not the text: 4.0 comes back as 4,
+				// and the config's spelling is kept.
+				Config: caseTable(s, baseFields, documents(upload(`      columns = { ShowOnPortal = "true", Rank = "4.0" }`))),
+				Check: published(map[string]any{
+					"columns": map[string]any{"ShowOnPortal": true, "Rank": float64(4)},
+				}),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, uploadPath.AtMapKey("columns").AtMapKey("Rank"), knownvalue.StringExact("4.0")),
+					statecheck.ExpectKnownValue(caseAddress, uploadPath.AtMapKey("max_bytes"), knownvalue.Null()),
+					statecheck.ExpectKnownValue(caseAddress, uploadPath.AtMapKey("extensions"), knownvalue.Null()),
+				},
+			},
+			{
+				// The same values held as strings, as the Table Manager may save them.
+				PreConfig: func() {
+					s.EditTable("default", "case", func(m map[string]any) {
+						m["documents"].(map[string]any)["upload"].(map[string]any)["columns"] =
+							map[string]any{"ShowOnPortal": "true", "Rank": "4.0"}
+					})
+				},
+				Config:           caseTable(s, baseFields, documents(upload(`      columns = { ShowOnPortal = "true", Rank = "4.0" }`))),
+				ConfigPlanChecks: emptyPlan,
+			},
+			{
+				// A value changed outside Terraform is drift: put the config back.
+				PreConfig: func() {
+					s.EditTable("default", "case", func(m map[string]any) {
+						m["documents"].(map[string]any)["upload"].(map[string]any)["columns"] =
+							map[string]any{"ShowOnPortal": false, "Rank": float64(4)}
+					})
+				},
+				Config:           caseTable(s, baseFields, documents(full)),
+				ConfigPlanChecks: update,
+				Check: published(map[string]any{
+					"maxBytes":   float64(1048576),
+					"extensions": []any{"pdf", "png"},
+					"columns":    map[string]any{"ShowOnPortal": true, "Rank": float64(4)},
+				}),
+			},
+			{
+				ResourceName:      caseAddress,
+				ImportState:       true,
+				ImportStateId:     "default/case",
+				ImportStateVerify: true,
+			},
+			{
+				Config: caseTable(s, baseFields, documents("")),
+				Check:  published(nil),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(caseAddress, uploadPath, knownvalue.Null()),
 				},
 			},
 		},

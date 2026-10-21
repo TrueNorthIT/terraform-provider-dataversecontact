@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -21,11 +23,11 @@ import (
 )
 
 // SharePoint documents on a table's rows (`documents` on the API's schema
-// hint, Contact API 1.34.0). The checks here are the ones the API's build
-// makes (server/config/scopes/documents.ts). The API's save does not run them
-// for documents, and a hint that fails them is published anyway, then left
-// out of the scope when the registry builds: the whole route disappears. So
-// they are made at plan time.
+// hint, Contact API 1.34.0; `documents.upload`, 1.35.0). The checks here are
+// the ones the API's build makes (server/config/scopes/documents.ts). The API's
+// save does not run them for documents, and a hint that fails them is
+// published anyway, then left out of the scope when the registry builds: the
+// whole route disappears. So they are made at plan time.
 
 // DocumentsModel lists the SharePoint documents in each row's folder.
 // SingleNestedBlock, like polymorphic_lookup: nil when the block is absent.
@@ -33,10 +35,21 @@ import (
 // error even when the block is left out), so ValidateConfig requires
 // permission.
 type DocumentsModel struct {
-	Permission types.String `tfsdk:"permission"`
-	Folder     types.String `tfsdk:"folder"`
-	Columns    types.Map    `tfsdk:"columns"`
-	Filters    types.List   `tfsdk:"filters"`
+	Permission types.String          `tfsdk:"permission"`
+	Folder     types.String          `tfsdk:"folder"`
+	Columns    types.Map             `tfsdk:"columns"`
+	Filters    types.List            `tfsdk:"filters"`
+	Upload     *DocumentsUploadModel `tfsdk:"upload"`
+}
+
+// DocumentsUploadModel lets callers upload into a row's folder. A nested
+// SingleNestedBlock: nil when the block is absent, which is what allows no
+// uploads. Every attribute is optional, so `upload {}` is a real config: upload
+// with the API's defaults.
+type DocumentsUploadModel struct {
+	MaxBytes   types.Int64 `tfsdk:"max_bytes"`
+	Extensions types.List  `tfsdk:"extensions"`
+	Columns    types.Map   `tfsdk:"columns"`
 }
 
 // DocumentsJSON is the hint's `documents` key.
@@ -45,6 +58,17 @@ type DocumentsJSON struct {
 	Folder     string               `json:"folder,omitempty"`
 	Columns    *DocumentColumnsJSON `json:"columns,omitempty"`
 	Filters    []string             `json:"filters,omitempty"`
+	Upload     *DocumentsUploadJSON `json:"upload,omitempty"`
+}
+
+// DocumentsUploadJSON is `documents.upload`. Absent means no uploads; `{}`
+// means uploads with the API's defaults. Columns holds each fixed value as
+// sent or read: the provider writes it typed by the column's declared type,
+// and the API also accepts (and keeps) strings.
+type DocumentsUploadJSON struct {
+	MaxBytes   *int64                     `json:"maxBytes,omitempty"`
+	Extensions []string                   `json:"extensions,omitempty"`
+	Columns    map[string]json.RawMessage `json:"columns,omitempty"`
 }
 
 // DocumentColumnsJSON is `documents.columns`. The provider always writes the
@@ -103,7 +127,24 @@ var allFilterOperators = []string{"eq", "ne", "gt", "ge", "lt", "le", "contains"
 const (
 	maxDocumentColumns = 30
 	maxDocumentFilters = 10
+
+	// documentUploadCap is the API's default DOCUMENT_UPLOAD_MAX_BYTES (4 MiB).
+	// A route's max_bytes never lifts an upload above the deployment's cap, so
+	// a larger value only takes effect where the deployment raised it.
+	documentUploadCap = 4194304
 )
+
+var (
+	// documentExtensionPattern is a file extension as the API's allowlist
+	// holds it: lower case, no dot.
+	documentExtensionPattern = regexp.MustCompile(`^[a-z0-9]+$`)
+	// jsonNumberPattern is a JSON number, which is how a number column's fixed
+	// value is sent.
+	jsonNumberPattern = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
+)
+
+// documentExecutableExtensions are never allowed for upload, even if listed.
+var documentExecutableExtensions = []string{"exe", "bat", "cmd", "com", "js", "msi", "ps1", "scr", "vbs", "sh", "dll"}
 
 func documentsBlock() schema.SingleNestedBlock {
 	builtIns := make([]string, 0, len(documentBuiltInFields))
@@ -121,12 +162,14 @@ func documentsBlock() schema.SingleNestedBlock {
 			"casedocuments = [\"me\"]). Each document carries id, name, folder, isFolder, mimeType, size, " +
 			"createdon and modifiedon, plus the columns declared here. Switch document management on for the " +
 			"table in Dataverse, and grant the API's service principal Sites.Selected with Read on the site. " +
+			"Add an upload block to let callers upload files too. " +
 			"Needs Contact API 1.34.0 or later: an older API keeps the key without an error but serves no documents.",
 		Attributes: map[string]schema.Attribute{
 			"permission": schema.StringAttribute{
 				Description: "Required in the block. Permission subject that lists the documents (e.g. " +
 					"\"casedocuments\"): casedocuments, casedocuments:team and casedocuments:all per tier. " +
-					"Only read grants under this name apply.",
+					"Its read grants list the documents; with an upload block, its create grants " +
+					"(casedocuments:create, :create:team, :create:all) upload them.",
 				Optional: true,
 				Validators: []validator.String{
 					stringvalidator.RegexMatches(documentsPermissionPattern,
@@ -167,7 +210,89 @@ func documentsBlock() schema.SingleNestedBlock {
 				},
 			},
 		},
+		Blocks: map[string]schema.Block{
+			"upload": documentsUploadBlock(),
+		},
 	}
+}
+
+func documentsUploadBlock() schema.SingleNestedBlock {
+	return schema.SingleNestedBlock{
+		Description: "Lets callers upload a file into a row's folder: POST /{tier}/{route}/{id}/documents?name=<file name> " +
+			"with the file's bytes as the body. Leave the block out to allow no uploads; upload {} allows them " +
+			"with the API's defaults. Uploading needs create on the documents permission at that tier, granted in " +
+			"dataversecontact_permissions_sync.default_permissions (e.g. casedocuments = [\"me\", \"create\"]); " +
+			"create doesn't imply listing. The row is checked with this table's own scoping first. A file never " +
+			"overwrites another (SharePoint renames a clash), and a row with no folder yet gets one. Grant the " +
+			"API's service principal Sites.Selected with Write on the site, and its Dataverse app user Create on " +
+			"Document Location. Needs Contact API 1.35.0 or later: an older API keeps the key without an error " +
+			"but accepts no uploads.",
+		Attributes: map[string]schema.Attribute{
+			"max_bytes": schema.Int64Attribute{
+				Description: "Largest file accepted, in bytes. Leave it out for the deployment's cap " +
+					"(DOCUMENT_UPLOAD_MAX_BYTES, 4194304 = 4 MiB by default), which a route can lower but never raise.",
+				Optional:   true,
+				Validators: []validator.Int64{int64validator.AtLeast(1)},
+			},
+			"extensions": schema.ListAttribute{
+				Description: "File extensions accepted, lower case without the dot (e.g. [\"pdf\", \"png\", \"jpg\"]), " +
+					"matched case-insensitively. Leave it out for the API's default list: pdf, png, jpg, jpeg, gif, " +
+					"webp, heic, txt, rtf, doc, docx, xls, xlsx, csv, odt, ods. Executable types (exe, bat, cmd, com, " +
+					"js, msi, ps1, scr, vbs, sh, dll) are never accepted.",
+				Optional:    true,
+				ElementType: types.StringType,
+				Validators: []validator.List{
+					listvalidator.SizeAtLeast(1),
+					listvalidator.UniqueValues(),
+					listvalidator.ValueStringsAre(documentExtensionValidator{}),
+				},
+			},
+			"columns": schema.MapAttribute{
+				Description: "SharePoint column values set on every uploaded file, e.g. { ShowOnPortal = \"true\" } so " +
+					"an upload passes filters = [\"ShowOnPortal eq true\"]. Each column must be declared in " +
+					"documents.columns, with its value written as a string that suits the declared type: \"true\" or " +
+					"\"false\" for boolean, a number such as \"4\" for number; the provider sends each as its type. " +
+					"Callers can't set or override them, and if they can't be set the upload is undone.",
+				Optional:    true,
+				ElementType: types.StringType,
+				Validators: []validator.Map{
+					mapvalidator.SizeAtLeast(1),
+				},
+			},
+		},
+	}
+}
+
+// documentExtensionValidator: an extension the API's allowlist can hold, and
+// never one it refuses outright.
+type documentExtensionValidator struct{}
+
+func (documentExtensionValidator) Description(context.Context) string {
+	return "must be a file extension in lower case, without the dot, and not an executable type"
+}
+
+func (v documentExtensionValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (documentExtensionValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	if problem := documentExtensionProblem(req.ConfigValue.ValueString()); problem != "" {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid upload extension", problem)
+	}
+}
+
+func documentExtensionProblem(ext string) string {
+	if !documentExtensionPattern.MatchString(ext) {
+		return fmt.Sprintf("%q: write a file extension in lower case, without the dot (e.g. \"pdf\").", ext)
+	}
+	if contains(documentExecutableExtensions, ext) {
+		return fmt.Sprintf("%q is an executable type, which the API never accepts for upload (%s).",
+			ext, strings.Join(documentExecutableExtensions, ", "))
+	}
+	return ""
 }
 
 // documentFolderValidator mirrors the API's folderSegments: below the row's
@@ -208,8 +333,9 @@ func documentFolderProblem(folder string) string {
 }
 
 // validateDocuments is the part of ValidateConfig for the documents block:
-// permission present, and every filter parses and names a field of the type
-// its operator needs.
+// permission present, every filter parses and names a field of the type its
+// operator needs, and upload's fixed columns are declared (see
+// validateDocumentsUpload).
 func validateDocuments(d *DocumentsModel) diag.Diagnostics {
 	var diags diag.Diagnostics
 	if d == nil {
@@ -222,6 +348,7 @@ func validateDocuments(d *DocumentsModel) diag.Diagnostics {
 				"dataversecontact_permissions_sync.default_permissions (e.g. permission = \"casedocuments\" "+
 				"and casedocuments = [\"me\"]).")
 	}
+	diags.Append(validateDocumentsUpload(d)...)
 
 	if d.Filters.IsNull() || d.Filters.IsUnknown() {
 		return diags
@@ -281,6 +408,93 @@ func validateDocuments(d *DocumentsModel) diag.Diagnostics {
 	return diags
 }
 
+// validateDocumentsUpload checks the upload block against the rest of
+// documents: each fixed column is declared in documents.columns with a type
+// its value suits. A max_bytes above the default cap is only a warning,
+// because a container deployment can raise the cap.
+func validateDocumentsUpload(d *DocumentsModel) diag.Diagnostics {
+	var diags diag.Diagnostics
+	u := d.Upload
+	if u == nil {
+		return diags
+	}
+	at := path.Root("documents").AtName("upload")
+
+	if !u.MaxBytes.IsNull() && !u.MaxBytes.IsUnknown() && u.MaxBytes.ValueInt64() > documentUploadCap {
+		diags.AddAttributeWarning(at.AtName("max_bytes"), "max_bytes above the default upload cap",
+			fmt.Sprintf("%d is above the API's default cap of %d bytes (4 MiB). The deployment's "+
+				"DOCUMENT_UPLOAD_MAX_BYTES still applies, so uploads stop at that cap unless the deployment "+
+				"raised it; a serverless deployment can't take requests above about 4.5 MB.",
+				u.MaxBytes.ValueInt64(), documentUploadCap))
+	}
+
+	// Until the columns are known, nothing can be checked against them.
+	if u.Columns.IsNull() || u.Columns.IsUnknown() || d.Columns.IsUnknown() {
+		return diags
+	}
+	declared := d.Columns.Elements() // empty when documents.columns is null
+	names := make([]string, 0, len(u.Columns.Elements()))
+	for name := range u.Columns.Elements() {
+		names = append(names, name)
+	}
+	sort.Strings(names) // diagnostics in a stable order
+	for _, name := range names {
+		columnAt := at.AtName("columns").AtMapKey(name)
+		t, ok := declared[name]
+		if !ok {
+			diags.AddAttributeError(columnAt, "Undeclared upload column",
+				fmt.Sprintf("%q isn't declared in documents.columns: declare it there with its type "+
+					"(e.g. %s = \"boolean\") before setting it on uploads.", name, name))
+			continue
+		}
+		typ, value := knownString(t), knownString(u.Columns.Elements()[name])
+		if typ == nil || value == nil {
+			continue // unknown until apply
+		}
+		if problem := documentColumnValueProblem(*typ, *value); problem != "" {
+			diags.AddAttributeError(columnAt, "Invalid upload column value",
+				fmt.Sprintf("%q is a %s column: %s", name, *typ, problem))
+		}
+	}
+	return diags
+}
+
+// knownString is a known string's value, or nil while null or unknown.
+func knownString(v attr.Value) *string {
+	s, ok := v.(types.String)
+	if !ok || s.IsNull() || s.IsUnknown() {
+		return nil
+	}
+	value := s.ValueString()
+	return &value
+}
+
+// documentColumnValueProblem: whether value, written as a string, suits a
+// column of type typ. string and datetime take any string.
+func documentColumnValueProblem(typ, value string) string {
+	switch typ {
+	case "boolean":
+		if value != "true" && value != "false" {
+			return fmt.Sprintf("%q isn't a boolean; use \"true\" or \"false\".", value)
+		}
+	case "number":
+		if _, ok := documentNumber(value); !ok {
+			return fmt.Sprintf("%q isn't a number; write it like \"4\" or \"2.5\".", value)
+		}
+	}
+	return ""
+}
+
+// documentNumber parses a number column's value as the JSON number it is sent
+// as. A value JSON can't carry (too large for a float64) doesn't parse.
+func documentNumber(value string) (float64, bool) {
+	if !jsonNumberPattern.MatchString(value) {
+		return 0, false
+	}
+	f, err := strconv.ParseFloat(value, 64)
+	return f, err == nil
+}
+
 // parseDocumentFilter splits "field operator value" the way the API's
 // parseFilterEntries does.
 func parseDocumentFilter(entry string) (field, operator, problem string) {
@@ -330,14 +544,59 @@ func documentsModelToJSON(ctx context.Context, d *DocumentsModel, diags *diag.Di
 		Folder:     d.Folder.ValueString(),
 		Filters:    tfListToStrings(ctx, d.Filters, diags),
 	}
+	var columns map[string]string
 	if !d.Columns.IsNull() && !d.Columns.IsUnknown() {
-		var columns map[string]string
 		diags.Append(d.Columns.ElementsAs(ctx, &columns, false)...)
 		if len(columns) > 0 {
 			out.Columns = &DocumentColumnsJSON{Types: columns}
 		}
 	}
+	out.Upload = documentsUploadModelToJSON(ctx, d.Upload, columns, diags)
 	return out
+}
+
+// documentsUploadModelToJSON: no block, no key, so a documents block without
+// upload publishes exactly what it did before upload existed. `upload {}` is
+// sent as {}: uploads with the API's defaults. columnTypes is documents.columns.
+func documentsUploadModelToJSON(ctx context.Context, u *DocumentsUploadModel, columnTypes map[string]string, diags *diag.Diagnostics) *DocumentsUploadJSON {
+	if u == nil {
+		return nil
+	}
+	out := &DocumentsUploadJSON{
+		Extensions: tfListToStrings(ctx, u.Extensions, diags),
+	}
+	if !u.MaxBytes.IsNull() && !u.MaxBytes.IsUnknown() {
+		maxBytes := u.MaxBytes.ValueInt64()
+		out.MaxBytes = &maxBytes
+	}
+	if !u.Columns.IsNull() && !u.Columns.IsUnknown() {
+		var values map[string]string
+		diags.Append(u.Columns.ElementsAs(ctx, &values, false)...)
+		if len(values) > 0 {
+			out.Columns = make(map[string]json.RawMessage, len(values))
+			for name, value := range values {
+				out.Columns[name] = documentColumnValueJSON(columnTypes[name], value)
+			}
+		}
+	}
+	return out
+}
+
+// documentColumnValueJSON sends a fixed column value as its declared type:
+// "true" as true for a boolean, "4" as 4 for a number. Anything else, or a
+// value that doesn't suit its type (ValidateConfig refuses those), goes as a
+// string, which the API also accepts.
+func documentColumnValueJSON(typ, value string) json.RawMessage {
+	switch {
+	case typ == "boolean" && (value == "true" || value == "false"):
+		return json.RawMessage(value)
+	case typ == "number":
+		if _, ok := documentNumber(value); ok {
+			return json.RawMessage(value)
+		}
+	}
+	quoted, _ := json.Marshal(value) // a string always marshals
+	return quoted
 }
 
 // documentsJSONToModel: absent and null both read back as no block. prior is
@@ -346,12 +605,81 @@ func documentsJSONToModel(d *DocumentsJSON, prior *DocumentsModel) *DocumentsMod
 	if d == nil {
 		return nil
 	}
+	var priorUpload *DocumentsUploadModel
+	if prior != nil {
+		priorUpload = prior.Upload
+	}
 	return &DocumentsModel{
 		Permission: types.StringValue(d.Permission),
 		Folder:     stringOrNull(d.Folder),
 		Columns:    documentColumnsToModel(d.Columns, prior),
 		Filters:    stringsToTFListOrNull(d.Filters),
+		Upload:     documentsUploadJSONToModel(d.Upload, priorUpload),
 	}
+}
+
+// documentsUploadJSONToModel: absent and null read back as no block, {} as a
+// block with every attribute null, matching `upload {}` in the config.
+func documentsUploadJSONToModel(u *DocumentsUploadJSON, prior *DocumentsUploadModel) *DocumentsUploadModel {
+	if u == nil {
+		return nil
+	}
+	maxBytes := types.Int64Null()
+	if u.MaxBytes != nil {
+		maxBytes = types.Int64Value(*u.MaxBytes)
+	}
+	return &DocumentsUploadModel{
+		MaxBytes:   maxBytes,
+		Extensions: stringsToTFListOrNull(u.Extensions),
+		Columns:    documentUploadColumnsToModel(u.Columns, prior),
+	}
+}
+
+// documentUploadColumnsToModel reads the fixed values back as the strings the
+// config writes: true as "true", 4 as "4", a string as itself. A number equal
+// to the one already in the plan or state keeps that spelling ("4.0" stays
+// "4.0"), since the API hands back the number, not the text it was sent. A
+// null value is no value.
+func documentUploadColumnsToModel(columns map[string]json.RawMessage, prior *DocumentsUploadModel) types.Map {
+	var priorValues map[string]attr.Value
+	if prior != nil && !prior.Columns.IsNull() && !prior.Columns.IsUnknown() {
+		priorValues = prior.Columns.Elements()
+	}
+	values := make(map[string]string, len(columns))
+	for name, raw := range columns {
+		value, isNumber, ok := documentColumnValueString(raw)
+		if !ok {
+			continue
+		}
+		if p := knownString(priorValues[name]); isNumber && p != nil {
+			if was, ok := documentNumber(*p); ok {
+				if now, ok := documentNumber(value); ok && was == now {
+					value = *p
+				}
+			}
+		}
+		values[name] = value
+	}
+	return stringMapOrNull(values)
+}
+
+// documentColumnValueString is one fixed value as a string, and whether the
+// API sent it as a JSON number. ok is false for null.
+func documentColumnValueString(raw json.RawMessage) (value string, isNumber, ok bool) {
+	trimmed := bytes.TrimSpace(raw)
+	switch {
+	case len(trimmed) == 0 || string(trimmed) == "null":
+		return "", false, false
+	case trimmed[0] == '"':
+		if err := json.Unmarshal(trimmed, &value); err == nil {
+			return value, false, true
+		}
+	case trimmed[0] == '-' || (trimmed[0] >= '0' && trimmed[0] <= '9'):
+		return string(trimmed), true, true
+	}
+	// true and false, and anything else (an object or array written outside
+	// Terraform) as its JSON text, so the next apply puts the config back.
+	return string(trimmed), false, true
 }
 
 // documentColumnsToModel reads columns back. The list form has no types: when

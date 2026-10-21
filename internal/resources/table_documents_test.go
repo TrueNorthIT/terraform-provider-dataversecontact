@@ -284,3 +284,283 @@ func TestDocumentFolderValidatorDescription(t *testing.T) {
 		t.Fatal("folder validator needs a description")
 	}
 }
+
+// ── upload ──────────────────────────────────────────────────────────────
+
+// documentsWith is a documents block with the given columns and upload.
+func documentsWith(columns types.Map, upload *DocumentsUploadModel) *DocumentsModel {
+	return &DocumentsModel{
+		Permission: types.StringValue("casedocuments"),
+		Folder:     types.StringNull(),
+		Columns:    columns,
+		Filters:    types.ListNull(types.StringType),
+		Upload:     upload,
+	}
+}
+
+func uploadOf(maxBytes types.Int64, extensions types.List, columns types.Map) *DocumentsUploadModel {
+	return &DocumentsUploadModel{MaxBytes: maxBytes, Extensions: extensions, Columns: columns}
+}
+
+func emptyUpload() *DocumentsUploadModel {
+	return uploadOf(types.Int64Null(), types.ListNull(types.StringType), types.MapNull(types.StringType))
+}
+
+// A documents block without upload publishes exactly what it did before
+// upload existed: no `upload` key. A published hint with the key null or
+// absent reads back as no block, so an existing config plans no change.
+func TestDocumentsNoUploadOmitsKey(t *testing.T) {
+	model := &TableResourceModel{}
+	readHint(t, documentsHint(``), model)
+	model.Documents = documentsWith(columnsOf(map[string]string{"ShowOnPortal": "boolean"}), nil)
+	got, _ := json.Marshal(writeHint(t, model)["documents"])
+	if want := `{"columns":{"ShowOnPortal":"boolean"},"permission":"casedocuments"}`; string(got) != want {
+		t.Fatalf("sent %s, want %s", got, want)
+	}
+
+	for name, upload := range map[string]string{"absent": ``, "null": `, "upload": null`} {
+		t.Run(name, func(t *testing.T) {
+			back := &TableResourceModel{}
+			readHint(t, documentsHint(`, "documents": {"permission": "casedocuments"`+upload+`}`), back)
+			if back.Documents == nil || back.Documents.Upload != nil {
+				t.Fatalf("read back %+v, want documents without upload", back.Documents)
+			}
+		})
+	}
+}
+
+// `upload {}` is upload with the API's defaults: sent as {}, and {} reads back
+// as a block with every attribute null, which is what the config holds.
+func TestDocumentsEmptyUpload(t *testing.T) {
+	model := &TableResourceModel{}
+	readHint(t, documentsHint(``), model)
+	model.Documents = documentsWith(types.MapNull(types.StringType), emptyUpload())
+	got, _ := json.Marshal(writeHint(t, model)["documents"])
+	if want := `{"permission":"casedocuments","upload":{}}`; string(got) != want {
+		t.Fatalf("sent %s, want %s", got, want)
+	}
+
+	back := &TableResourceModel{}
+	readHint(t, documentsHint(`, "documents": `+string(got)), back)
+	u := back.Documents.Upload
+	if u == nil || !u.MaxBytes.IsNull() || !u.Extensions.IsNull() || !u.Columns.IsNull() {
+		t.Fatalf("{} should read back as an empty block, got %+v", u)
+	}
+
+	// Empty values the API might hand back read as null too, not as empty.
+	readHint(t, documentsHint(`, "documents": {"permission": "casedocuments", "upload": {"extensions": [], "columns": {}}}`), back)
+	if u := back.Documents.Upload; u == nil || !u.Extensions.IsNull() || !u.Columns.IsNull() {
+		t.Fatalf("empty values should read back null, got %+v", u)
+	}
+}
+
+// Every attribute goes out under the API's names, each fixed column typed by
+// its declared type, and comes back as the strings the config wrote.
+func TestDocumentsUploadRoundTrip(t *testing.T) {
+	columns := columnsOf(map[string]string{"ShowOnPortal": "boolean", "Rank": "number", "DocType": "string", "Due": "datetime"})
+	in := uploadOf(types.Int64Value(1048576), filtersOf("pdf", "png"),
+		columnsOf(map[string]string{"ShowOnPortal": "true", "Rank": "4", "DocType": "true", "Due": "2026-01-01"}))
+	model := &TableResourceModel{}
+	readHint(t, documentsHint(``), model)
+	model.Documents = documentsWith(columns, in)
+
+	got, _ := json.Marshal(writeHint(t, model)["documents"].(map[string]any)["upload"])
+	want := `{"columns":{"DocType":"true","Due":"2026-01-01","Rank":4,"ShowOnPortal":true},"extensions":["pdf","png"],"maxBytes":1048576}`
+	if string(got) != want {
+		t.Fatalf("sent %s\nwant %s", got, want)
+	}
+
+	// Read back with no prior (an import) and with one (a refresh): no change either way.
+	for name, prior := range map[string]*DocumentsModel{"import": nil, "refresh": documentsWith(columns, in)} {
+		t.Run(name, func(t *testing.T) {
+			back := &TableResourceModel{Documents: prior}
+			readHint(t, documentsHint(`, "documents": {"permission": "casedocuments", "upload": `+string(got)+`}`), back)
+			u := back.Documents.Upload
+			if u == nil || !u.MaxBytes.Equal(in.MaxBytes) || !u.Extensions.Equal(in.Extensions) || !u.Columns.Equal(in.Columns) {
+				t.Fatalf("changed in the round trip: %+v", u)
+			}
+		})
+	}
+}
+
+// Optional attributes left out are left out of the JSON.
+func TestDocumentsUploadOptionalOmitted(t *testing.T) {
+	for name, c := range map[string]struct {
+		upload *DocumentsUploadModel
+		want   string
+	}{
+		"max_bytes only":  {uploadOf(types.Int64Value(1000), types.ListNull(types.StringType), types.MapNull(types.StringType)), `{"maxBytes":1000}`},
+		"extensions only": {uploadOf(types.Int64Null(), filtersOf("pdf"), types.MapNull(types.StringType)), `{"extensions":["pdf"]}`},
+		"columns only":    {uploadOf(types.Int64Null(), types.ListNull(types.StringType), columnsOf(map[string]string{"ShowOnPortal": "false"})), `{"columns":{"ShowOnPortal":false}}`},
+		"unknown values":  {uploadOf(types.Int64Unknown(), types.ListUnknown(types.StringType), types.MapUnknown(types.StringType)), `{}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			model := &TableResourceModel{}
+			readHint(t, documentsHint(``), model)
+			model.Documents = documentsWith(columnsOf(map[string]string{"ShowOnPortal": "boolean"}), c.upload)
+			got, _ := json.Marshal(writeHint(t, model)["documents"].(map[string]any)["upload"])
+			if string(got) != c.want {
+				t.Fatalf("sent %s, want %s", got, c.want)
+			}
+		})
+	}
+}
+
+// What the API (or the Table Manager) hands back reads as the config's
+// strings: typed values, the same values as strings, and a number the API
+// re-spelled.
+func TestDocumentUploadColumnsRead(t *testing.T) {
+	prior := uploadOf(types.Int64Null(), types.ListNull(types.StringType),
+		columnsOf(map[string]string{"Rank": "4.0", "Score": "1000", "Other": "7"}))
+	raw := map[string]json.RawMessage{
+		"Flag":   json.RawMessage(`true`),
+		"Off":    json.RawMessage(`false`),
+		"AsText": json.RawMessage(`"true"`),
+		"Rank":   json.RawMessage(`4`),     // sent as 4.0, kept as the config spelt it
+		"Score":  json.RawMessage(`1e3`),   // the same number, spelt differently
+		"Other":  json.RawMessage(`8`),     // a different number: the API's value
+		"Neg":    json.RawMessage(` -2.5`), // no prior
+		"Gone":   json.RawMessage(`null`),
+		"Odd":    json.RawMessage(`{"a": 1}`),
+	}
+	got := documentUploadColumnsToModel(raw, prior)
+	want := columnsOf(map[string]string{
+		"Flag": "true", "Off": "false", "AsText": "true", "Rank": "4.0", "Score": "1000",
+		"Other": "8", "Neg": "-2.5", "Odd": `{"a": 1}`,
+	})
+	if !got.Equal(want) {
+		t.Fatalf("got %v\nwant %v", got, want)
+	}
+
+	// A string the API holds is never matched as a number.
+	textPrior := uploadOf(types.Int64Null(), types.ListNull(types.StringType), columnsOf(map[string]string{"Rank": "4.0"}))
+	if got := documentUploadColumnsToModel(map[string]json.RawMessage{"Rank": json.RawMessage(`"4"`)}, textPrior); !got.Equal(columnsOf(map[string]string{"Rank": "4"})) {
+		t.Fatalf("a string value should read as itself, got %v", got)
+	}
+
+	if got := documentUploadColumnsToModel(map[string]json.RawMessage{"Gone": json.RawMessage(`null`)}, nil); !got.IsNull() {
+		t.Fatalf("only null values should read back as no columns, got %v", got)
+	}
+	if got := documentUploadColumnsToModel(nil, prior); !got.IsNull() {
+		t.Fatalf("no columns should read back null, got %v", got)
+	}
+}
+
+func TestDocumentColumnValueJSON(t *testing.T) {
+	for _, c := range []struct{ typ, value, want string }{
+		{"boolean", "true", `true`},
+		{"boolean", "false", `false`},
+		{"boolean", "yes", `"yes"`}, // refused at plan time; a string if it ever got here
+		{"number", "4", `4`},
+		{"number", "-2.5e3", `-2.5e3`},
+		{"number", "four", `"four"`},
+		{"number", "1e999", `"1e999"`},
+		{"string", "true", `"true"`},
+		{"datetime", "2026-01-01", `"2026-01-01"`},
+		{"", "undeclared", `"undeclared"`},
+		{"string", `say "hi"`, `"say \"hi\""`},
+	} {
+		if got := string(documentColumnValueJSON(c.typ, c.value)); got != c.want {
+			t.Errorf("%s %q: sent %s, want %s", c.typ, c.value, got, c.want)
+		}
+	}
+}
+
+func TestDocumentExtensionProblem(t *testing.T) {
+	for ext, ok := range map[string]bool{
+		"pdf":    true,
+		"docx":   true,
+		"7z":     true,
+		"":       false,
+		"PDF":    false,
+		".pdf":   false,
+		"tar.gz": false,
+		"p df":   false,
+		"exe":    false,
+		"js":     false,
+		"ps1":    false,
+		"dll":    false,
+	} {
+		if got := documentExtensionProblem(ext) == ""; got != ok {
+			t.Errorf("extension %q: valid = %v, want %v (%s)", ext, got, ok, documentExtensionProblem(ext))
+		}
+	}
+	if !strings.Contains(documentExtensionProblem("exe"), "executable") {
+		t.Fatal("an executable should say so")
+	}
+}
+
+func TestValidateDocumentsUpload(t *testing.T) {
+	columns := columnsOf(map[string]string{"ShowOnPortal": "boolean", "Rank": "number", "DocType": "string", "Due": "datetime"})
+	noList := types.ListNull(types.StringType)
+	fixed := func(values map[string]string) *DocumentsUploadModel {
+		return uploadOf(types.Int64Null(), noList, columnsOf(values))
+	}
+
+	cases := []struct {
+		name    string
+		d       *DocumentsModel
+		want    string // substring of the error; "" = valid
+		warning string // substring of a warning; "" = none
+	}{
+		{name: "no upload", d: documentsWith(columns, nil)},
+		{name: "empty upload", d: documentsWith(types.MapNull(types.StringType), emptyUpload())},
+		{name: "every type", d: documentsWith(columns, fixed(map[string]string{
+			"ShowOnPortal": "false", "Rank": "-2.5", "DocType": "anything", "Due": "2026-01-01"}))},
+		{name: "undeclared column", d: documentsWith(columns, fixed(map[string]string{"Hidden": "x"})),
+			want: `"Hidden" isn't declared in documents.columns`},
+		{name: "no columns declared", d: documentsWith(types.MapNull(types.StringType), fixed(map[string]string{"ShowOnPortal": "true"})),
+			want: `"ShowOnPortal" isn't declared in documents.columns`},
+		{name: "boolean spelt otherwise", d: documentsWith(columns, fixed(map[string]string{"ShowOnPortal": "True"})),
+			want: `"ShowOnPortal" is a boolean column: "True" isn't a boolean`},
+		{name: "boolean as yes", d: documentsWith(columns, fixed(map[string]string{"ShowOnPortal": "yes"})),
+			want: `isn't a boolean`},
+		{name: "not a number", d: documentsWith(columns, fixed(map[string]string{"Rank": "four"})),
+			want: `"Rank" is a number column: "four" isn't a number`},
+		{name: "number JSON can't carry", d: documentsWith(columns, fixed(map[string]string{"Rank": "1e999"})),
+			want: `isn't a number`},
+		{name: "number with spaces", d: documentsWith(columns, fixed(map[string]string{"Rank": " 4"})),
+			want: `isn't a number`},
+		{name: "unknown declared columns", d: documentsWith(types.MapUnknown(types.StringType), fixed(map[string]string{"Hidden": "x"}))},
+		{name: "unknown declared type", d: documentsWith(
+			types.MapValueMust(types.StringType, map[string]attr.Value{"Rank": types.StringUnknown()}),
+			fixed(map[string]string{"Rank": "four"}))},
+		{name: "unknown value", d: documentsWith(columns, uploadOf(types.Int64Null(), noList,
+			types.MapValueMust(types.StringType, map[string]attr.Value{"Rank": types.StringUnknown()})))},
+		{name: "unknown upload columns", d: documentsWith(columns, uploadOf(types.Int64Null(), noList, types.MapUnknown(types.StringType)))},
+		{name: "max_bytes at the cap", d: documentsWith(columns, uploadOf(types.Int64Value(4194304), noList, types.MapNull(types.StringType)))},
+		{name: "max_bytes above the cap", d: documentsWith(columns, uploadOf(types.Int64Value(4194305), noList, types.MapNull(types.StringType))),
+			warning: "above the API's default cap"},
+		{name: "unknown max_bytes", d: documentsWith(columns, uploadOf(types.Int64Unknown(), noList, types.MapNull(types.StringType)))},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			diags := validateDocuments(c.d)
+			var errs, warns strings.Builder
+			for _, e := range diags.Errors() {
+				errs.WriteString(e.Summary() + ": " + e.Detail() + "\n")
+			}
+			for _, w := range diags.Warnings() {
+				warns.WriteString(w.Summary() + ": " + w.Detail() + "\n")
+			}
+			switch {
+			case c.want == "" && diags.HasError():
+				t.Fatalf("unexpected error: %s", errs.String())
+			case c.want != "" && !strings.Contains(errs.String(), c.want):
+				t.Fatalf("errors %q do not mention %q", errs.String(), c.want)
+			case c.warning == "" && diags.WarningsCount() > 0:
+				t.Fatalf("unexpected warning: %s", warns.String())
+			case c.warning != "" && !strings.Contains(warns.String(), c.warning):
+				t.Fatalf("warnings %q do not mention %q", warns.String(), c.warning)
+			}
+		})
+	}
+}
+
+func TestDocumentExtensionValidatorDescription(t *testing.T) {
+	ctx := context.Background()
+	v := documentExtensionValidator{}
+	if v.Description(ctx) == "" || v.MarkdownDescription(ctx) != v.Description(ctx) {
+		t.Fatal("extension validator needs a description")
+	}
+}

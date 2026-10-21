@@ -39,6 +39,11 @@ the admin GET's envelope. It carries `files` (child files) and a reverse join st
 filter. The admin GET returns the hint as authored, so this is what comes back. Re-record it from
 the live API once 1.34.0 is deployed.
 
+**From the API contract, until it ships** (`get-table-published-case-documents-upload`): the same,
+with `documents.upload` (API 1.35.0): `maxBytes`, `extensions`, and fixed `columns` values typed
+as their declared column types (a JSON boolean, string and number), which is how the provider sends
+them. Re-record it from the live API once 1.35.0 is deployed.
+
 ## Refreshing
 
 When the API changes a response, update the fixture first, then make the client and the fake
