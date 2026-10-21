@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Failures below the API's own error responses: the request can't be built
@@ -27,8 +28,10 @@ func TestDoRequestFailures(t *testing.T) {
 
 	closed := httptest.NewServer(http.NotFoundHandler())
 	closed.Close()
-	if _, err := NewClient(closed.URL, "k").GetScopes(ctx); err == nil ||
-		!strings.Contains(err.Error(), "request failed") {
+	unreachable := NewClient(closed.URL, "k")
+	unreachable.sleep = func(context.Context, time.Duration) error { return nil }
+	if _, err := unreachable.GetScopes(ctx); err == nil ||
+		!strings.Contains(err.Error(), "request failed") || !strings.Contains(err.Error(), "gave up after 4 attempts") {
 		t.Errorf("unreachable API: %v", err)
 	}
 }
@@ -40,7 +43,9 @@ func TestErrorBodyWithoutMessage(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := NewClient(srv.URL, "k").GetTable(context.Background(), "default", "case")
+	c := NewClient(srv.URL, "k")
+	c.sleep = func(context.Context, time.Duration) error { return nil }
+	_, err := c.GetTable(context.Background(), "default", "case")
 	if err == nil || !strings.Contains(err.Error(), "API error (502): <html>upstream down</html>") {
 		t.Errorf("non-JSON error body must be passed through, got %v", err)
 	}

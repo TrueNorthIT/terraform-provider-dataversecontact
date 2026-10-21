@@ -261,13 +261,18 @@ func routeNotPublished(route string, published []string, errs []RouteError) erro
 //
 // A 404 is only accepted when `remove` also reported nothing removed. If
 // remove DID bin the table and the purge then 404s, something raced us and the
-// error is real.
+// error is real. And `remove` must have answered: it reports a table it can't
+// find as a per-route error in a 200, so a failed request (a restarting API)
+// says nothing about whether the table is gone, and the delete stops there.
 func (c *Client) DeleteTable(ctx context.Context, scope, routeName string) error {
 	// Step 1: Unpublish (ignore errors — may already be unpublished)
 	_, _ = c.UnpublishTables(ctx, scope, []string{routeName})
 
-	// Step 2: Remove to recycle bin (ignore errors — may already be removed)
-	removeResp, _ := c.RemoveTables(ctx, scope, []string{routeName})
+	// Step 2: Remove to recycle bin
+	removeResp, err := c.RemoveTables(ctx, scope, []string{routeName})
+	if err != nil && !IsNotFound(err) {
+		return fmt.Errorf("failed to remove table %q: %w", routeName, err)
+	}
 	binned := removeResp != nil && len(removeResp.Removed) > 0
 
 	// Step 3: Permanently delete
