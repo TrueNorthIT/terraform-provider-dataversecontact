@@ -43,6 +43,7 @@ type SchemaHintJSON struct {
 	PermissionGroup           string                   `json:"permissionGroup,omitempty"`
 	FetchXml                  string                   `json:"fetchXml,omitempty"`
 	Reference                 string                   `json:"reference,omitempty"`
+	Invites                   []string                 `json:"invites,omitempty"`
 	Fields                    map[string]FieldHintJSON `json:"fields"`
 }
 
@@ -156,6 +157,7 @@ func modelToSchemaJSON(ctx context.Context, model *TableResourceModel, diags *di
 	hint.Aliases = tfListToStrings(ctx, model.Aliases, diags)
 	hint.LookupSearchContains = tfListToStrings(ctx, model.LookupSearchContains, diags)
 	hint.Filters = tfListToStrings(ctx, model.Filters, diags)
+	hint.Invites = tfListToStrings(ctx, model.Invites, diags)
 
 	// Default filters to ["statecode eq 0"] if not specified
 	if hint.Filters == nil {
@@ -275,6 +277,7 @@ func schemaJSONToModel(ctx context.Context, raw json.RawMessage, model *TableRes
 	model.Aliases = stringsToTFList(hint.Aliases)
 	model.LookupSearchContains = stringsToTFList(hint.LookupSearchContains)
 	model.Filters = stringsToTFList(hint.Filters)
+	model.Invites = stringsToTFListOrNull(hint.Invites)
 
 	// Booleans
 	if hint.PublicChoices != nil {

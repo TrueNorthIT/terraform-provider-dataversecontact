@@ -62,6 +62,7 @@ type TableResourceModel struct {
 	PermissionGroup      types.String          `tfsdk:"permission_group"`
 	FetchXml             types.String          `tfsdk:"fetch_xml"`
 	Reference            types.String          `tfsdk:"reference"`
+	Invites              types.List            `tfsdk:"invites"`
 	Aliases              types.List            `tfsdk:"aliases"`
 	LookupSearchContains types.List            `tfsdk:"lookup_search_contains"`
 	Filters              types.List            `tfsdk:"filters"`
@@ -592,6 +593,23 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 			"fetch_xml": schema.StringAttribute{
 				Description: "FetchXML template for custom list queries.",
 				Optional:    true,
+			},
+			"invites": schema.ListAttribute{
+				Description: "What a one-time invite link may do on this table, for someone with no account: " +
+					"\"create\" (on a child table such as casenotes, add one row under its parent, e.g. a note on a " +
+					"case; on any other table, log one new row) and \"update\" (change named columns of one row, " +
+					"once). Sending one from the API needs invite plus create or write on this table at that tier " +
+					"(e.g. casenotes = [\"invite\", \"create\"]); officers can also send them from the Portal Access " +
+					"app. A contact table takes \"update\" only. Uploads are documents.upload.invites. Set the " +
+					"scope's invite_url on dataversecontact_permissions_sync so links point at the portal. Needs " +
+					"Contact API 1.37.0 or later.",
+				Optional:    true,
+				ElementType: types.StringType,
+				Validators: []validator.List{
+					listvalidator.SizeAtLeast(1),
+					listvalidator.UniqueValues(),
+					listvalidator.ValueStringsAre(stringvalidator.OneOf("create", "update")),
+				},
 			},
 			"reference": logicalName(
 				"The column people quote for a row, such as a case's \"ticketnumber\". Every request that touches a row of this table, "+

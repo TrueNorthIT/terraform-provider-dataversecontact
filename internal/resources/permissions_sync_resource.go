@@ -37,6 +37,7 @@ type PermissionsSyncResourceModel struct {
 	Join               *JoinModel         `tfsdk:"join"`
 	ContactEmailColumn types.String       `tfsdk:"contact_email_column"`
 	ContactFilters     types.List         `tfsdk:"contact_filters"`
+	InviteURL          types.String       `tfsdk:"invite_url"`
 	PermissionCount    types.Int64        `tfsdk:"permission_count"`
 }
 
@@ -204,6 +205,22 @@ func (r *PermissionsSyncResource) Schema(_ context.Context, _ resource.SchemaReq
 					),
 				},
 			},
+			"invite_url": schema.StringAttribute{
+				Description: "The portal page an invite link opens, with {token} where the invite's token goes, " +
+					"e.g. \"https://portal.example.gov.uk/invite#token={token}\". Put the token in the fragment " +
+					"(after #), so it never reaches the portal's server logs, a Referer header or analytics. " +
+					"Needed before anyone can send an invite in this scope (tables opt in with invites and " +
+					"documents.upload.invites). Must be https. Published as `inviteUrl` in the scope's " +
+					"defaults.json. Needs Contact API 1.37.0 or later.",
+				Optional: true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtMost(500),
+					stringvalidator.RegexMatches(
+						regexp.MustCompile(`^https://[^/?#\s]+.*\{token\}`),
+						"must be an https URL with {token} where the invite's token goes, e.g. \"https://portal.example.gov.uk/invite#token={token}\"",
+					),
+				},
+			},
 			"contact_filters": schema.ListAttribute{
 				Description: "Extra OData conditions a contact must meet to count as the signed-in person, " +
 					"all of which must hold — written like a table's filters, e.g. [\"cpa_portaluser eq true\"]. " +
@@ -326,9 +343,10 @@ func (r *PermissionsSyncResource) publish(ctx context.Context, plan *Permissions
 		"join":                 join != nil,
 		"contact_email_column": contactEmailColumn,
 		"contact_filters":      len(contactFilters),
+		"invite_url":           plan.InviteURL.ValueString() != "",
 	})
 
-	if _, err := r.client.PublishDefaults(ctx, scope, permissions, allowSelfRegister, companyModel, join, contactEmailColumn, contactFilters); err != nil {
+	if _, err := r.client.PublishDefaults(ctx, scope, permissions, allowSelfRegister, companyModel, join, contactEmailColumn, contactFilters, plan.InviteURL.ValueString()); err != nil {
 		resp.AddError("Failed to publish permissions", err.Error())
 		return
 	}

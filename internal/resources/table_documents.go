@@ -50,6 +50,7 @@ type DocumentsUploadModel struct {
 	MaxBytes   types.Int64 `tfsdk:"max_bytes"`
 	Extensions types.List  `tfsdk:"extensions"`
 	Columns    types.Map   `tfsdk:"columns"`
+	Invites    types.Bool  `tfsdk:"invites"`
 }
 
 // DocumentsJSON is the hint's `documents` key.
@@ -69,6 +70,7 @@ type DocumentsUploadJSON struct {
 	MaxBytes   *int64                     `json:"maxBytes,omitempty"`
 	Extensions []string                   `json:"extensions,omitempty"`
 	Columns    map[string]json.RawMessage `json:"columns,omitempty"`
+	Invites    *bool                      `json:"invites,omitempty"`
 }
 
 // DocumentColumnsJSON is `documents.columns`. The provider always writes the
@@ -262,6 +264,15 @@ func documentsUploadBlock() schema.SingleNestedBlock {
 				Validators: []validator.Map{
 					mapvalidator.SizeAtLeast(1),
 				},
+			},
+			"invites": schema.BoolAttribute{
+				Description: "Let an officer send a one-time invite link to upload one document to a row, for " +
+					"someone with no account (the invite tier: POST /invite/{route}/{id}/documents/uploads, then " +
+					".../{uploadId}/complete). Sending one from the API needs invite and create on the documents " +
+					"permission at that tier (e.g. casedocuments = [\"invite\", \"create\"]); officers can also send " +
+					"them from the Portal Access app. Set the scope's invite_url on dataversecontact_permissions_sync " +
+					"so links point at the portal. Needs Contact API 1.37.0 or later.",
+				Optional: true,
 			},
 		},
 	}
@@ -574,6 +585,11 @@ func documentsUploadModelToJSON(ctx context.Context, u *DocumentsUploadModel, co
 		maxBytes := u.MaxBytes.ValueInt64()
 		out.MaxBytes = &maxBytes
 	}
+	// Sent as written, false included, so it reads back the same.
+	if !u.Invites.IsNull() && !u.Invites.IsUnknown() {
+		invites := u.Invites.ValueBool()
+		out.Invites = &invites
+	}
 	if !u.Columns.IsNull() && !u.Columns.IsUnknown() {
 		var values map[string]string
 		diags.Append(u.Columns.ElementsAs(ctx, &values, false)...)
@@ -633,10 +649,15 @@ func documentsUploadJSONToModel(u *DocumentsUploadJSON, prior *DocumentsUploadMo
 	if u.MaxBytes != nil {
 		maxBytes = types.Int64Value(*u.MaxBytes)
 	}
+	invites := types.BoolNull()
+	if u.Invites != nil {
+		invites = types.BoolValue(*u.Invites)
+	}
 	return &DocumentsUploadModel{
 		MaxBytes:   maxBytes,
 		Extensions: stringsToTFListOrNull(u.Extensions),
 		Columns:    documentUploadColumnsToModel(u.Columns, prior),
+		Invites:    invites,
 	}
 }
 
