@@ -61,6 +61,7 @@ type TableResourceModel struct {
 	Icon                 types.String          `tfsdk:"icon"`
 	PermissionGroup      types.String          `tfsdk:"permission_group"`
 	FetchXml             types.String          `tfsdk:"fetch_xml"`
+	Reference            types.String          `tfsdk:"reference"`
 	Aliases              types.List            `tfsdk:"aliases"`
 	LookupSearchContains types.List            `tfsdk:"lookup_search_contains"`
 	Filters              types.List            `tfsdk:"filters"`
@@ -592,6 +593,13 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Description: "FetchXML template for custom list queries.",
 				Optional:    true,
 			},
+			"reference": logicalName(
+				"The column people quote for a row, such as a case's \"ticketnumber\". Every request that touches a row of this table, "+
+					"or something attached to it (a note, a document upload, an action), logs the row's value as reference in App Insights, "+
+					"so a free-text search for the case number finds it. Must be one of fields, of type string or number. "+
+					"Needs Contact API 1.40.0 or later: an older API keeps the key without an error but logs nothing.",
+				false,
+			),
 			// aliases and lookup_search_contains read back as [] when the API
 			// has none, so they are Computed: omitting them or writing [] must
 			// both apply without an inconsistent-result error.

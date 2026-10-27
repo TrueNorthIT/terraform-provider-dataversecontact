@@ -28,6 +28,11 @@ resource "dataversecontact_table" "case" {
   default_select = ["title", "ticketnumber", "createdon", "statuscode"]
   lookup_fields  = ["title", "ticketnumber"]
 
+  # Log the case number with every request that touches a case (or a note,
+  # document or action on it), so App Insights can be searched for the number
+  # a citizen quotes. Must be one of the fields below.
+  reference = "ticketnumber"
+
   fields = {
     title = {
       type        = "string"
@@ -323,6 +328,7 @@ A target's columns are published without anyone reviewing them — that is the t
 - `public_choices` (Boolean) Whether choice/option set values are publicly accessible. Defaults to true.
 - `public_create` (Boolean) Whether unauthenticated POST is allowed on the public tier.
 - `public_read` (Boolean) Whether this table is publicly readable without authentication.
+- `reference` (String) The column people quote for a row, such as a case's "ticketnumber". Every request that touches a row of this table, or something attached to it (a note, a document upload, an action), logs the row's value as reference in App Insights, so a free-text search for the case number finds it. Must be one of fields, of type string or number. Needs Contact API 1.40.0 or later: an older API keeps the key without an error but logs nothing.
 - `required_permission` (String) The base permission name (e.g. "case"). If omitted, defaults to route_name.
 - `team_join_step` (Block List) Steps to join back to the account for team-scoped queries (ordered). (see [below for nested schema](#nestedblock--team_join_step))
 

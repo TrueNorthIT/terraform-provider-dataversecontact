@@ -42,6 +42,7 @@ type SchemaHintJSON struct {
 	PublicCreate              *bool                    `json:"publicCreate,omitempty"`
 	PermissionGroup           string                   `json:"permissionGroup,omitempty"`
 	FetchXml                  string                   `json:"fetchXml,omitempty"`
+	Reference                 string                   `json:"reference,omitempty"`
 	Fields                    map[string]FieldHintJSON `json:"fields"`
 }
 
@@ -146,6 +147,7 @@ func modelToSchemaJSON(ctx context.Context, model *TableResourceModel, diags *di
 		PrimaryKey:           model.PrimaryKey.ValueString(),
 		PermissionGroup:      model.PermissionGroup.ValueString(),
 		FetchXml:             model.FetchXml.ValueString(),
+		Reference:            model.Reference.ValueString(),
 	}
 
 	// Simple string lists
@@ -265,6 +267,7 @@ func schemaJSONToModel(ctx context.Context, raw json.RawMessage, model *TableRes
 	model.Icon = stringOrNull(hint.Icon)
 	model.PermissionGroup = stringOrNull(hint.PermissionGroup)
 	model.FetchXml = stringOrNull(hint.FetchXml)
+	model.Reference = stringOrNull(hint.Reference)
 
 	// Simple lists
 	model.DefaultSelect = stringsToTFList(hint.DefaultSelect)

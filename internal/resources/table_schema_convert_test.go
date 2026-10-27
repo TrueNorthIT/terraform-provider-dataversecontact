@@ -488,3 +488,53 @@ func TestEmptyListAttrsReadAsEmptyList(t *testing.T) {
 		}
 	}
 }
+
+// TestReferenceRoundTrip: the column logged with every request that touches a
+// row is sent when set and read back as written; a table without one sends no
+// key and reads back null, so neither shows a plan diff.
+func TestReferenceRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	var diags diag.Diagnostics
+
+	model := func(reference types.String) *TableResourceModel {
+		return &TableResourceModel{
+			RouteName:            types.StringValue("case"),
+			DataverseTable:       types.StringValue("incidents"),
+			DataverseLogicalName: types.StringValue("incident"),
+			PrimaryKey:           types.StringValue("incidentid"),
+			RequiredPermission:   types.StringValue("case"),
+			DefaultSelect:        stringsToTFList([]string{"incidentid", "ticketnumber"}),
+			LookupFields:         stringsToTFList([]string{"ticketnumber"}),
+			Fields: fieldsJSONToModel(ctx, map[string]FieldHintJSON{
+				"ticketnumber": {Type: "string", Description: "Case number", ReadOnly: true},
+			}, types.MapNull(fieldObjectType()), &diags),
+			Reference: reference,
+		}
+	}
+
+	raw := modelToSchemaJSON(ctx, model(types.StringValue("ticketnumber")), &diags)
+	if diags.HasError() {
+		t.Fatalf("modelToSchemaJSON: %v", diags.Errors())
+	}
+	if !strings.Contains(string(raw), `"reference":"ticketnumber"`) {
+		t.Fatalf("reference not sent: %s", raw)
+	}
+	back := &TableResourceModel{}
+	schemaJSONToModel(ctx, raw, back, &diags)
+	if diags.HasError() {
+		t.Fatalf("schemaJSONToModel: %v", diags.Errors())
+	}
+	if got := back.Reference.ValueString(); got != "ticketnumber" {
+		t.Fatalf("reference read back as %q", got)
+	}
+
+	raw = modelToSchemaJSON(ctx, model(types.StringNull()), &diags)
+	if strings.Contains(string(raw), `"reference"`) {
+		t.Fatalf("a table with no reference sent one: %s", raw)
+	}
+	back = &TableResourceModel{}
+	schemaJSONToModel(ctx, raw, back, &diags)
+	if !back.Reference.IsNull() {
+		t.Fatalf("reference = %v, want null", back.Reference)
+	}
+}
