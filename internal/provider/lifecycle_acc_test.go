@@ -481,7 +481,16 @@ func TestAccPermissionsSync_inviteURL(t *testing.T) {
 	const url = "https://portal.example.gov.uk/invite#token={token}"
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		// The refusals first: the test's last config is the one it destroys with.
 		Steps: []resource.TestStep{
+			{
+				Config:      permissionsSync(s, `  invite_url = "http://portal.example.gov.uk/invite#token={token}"`),
+				ExpectError: regexp.MustCompile(`https URL`),
+			},
+			{
+				Config:      permissionsSync(s, `  invite_url = "https://portal.example.gov.uk/invite"`),
+				ExpectError: regexp.MustCompile(`https URL`),
+			},
 			{
 				Config: permissionsSync(s, `  invite_url = "`+url+`"`),
 				Check: expectDefaults(s, map[string]any{
@@ -496,14 +505,6 @@ func TestAccPermissionsSync_inviteURL(t *testing.T) {
 					"permissions":       map[string]any{},
 					"allowSelfRegister": false,
 				}),
-			},
-			{
-				Config:      permissionsSync(s, `  invite_url = "http://portal.example.gov.uk/invite#token={token}"`),
-				ExpectError: regexp.MustCompile(`https URL`),
-			},
-			{
-				Config:      permissionsSync(s, `  invite_url = "https://portal.example.gov.uk/invite"`),
-				ExpectError: regexp.MustCompile(`https URL`),
 			},
 		},
 	})
