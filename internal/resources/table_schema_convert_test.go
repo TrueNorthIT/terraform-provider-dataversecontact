@@ -488,3 +488,139 @@ func TestEmptyListAttrsReadAsEmptyList(t *testing.T) {
 		}
 	}
 }
+
+// TestReferenceRoundTrip: the column logged with every request that touches a
+// row is sent when set and read back as written; a table without one sends no
+// key and reads back null, so neither shows a plan diff.
+func TestReferenceRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	var diags diag.Diagnostics
+
+	model := func(reference types.String) *TableResourceModel {
+		return &TableResourceModel{
+			RouteName:            types.StringValue("case"),
+			DataverseTable:       types.StringValue("incidents"),
+			DataverseLogicalName: types.StringValue("incident"),
+			PrimaryKey:           types.StringValue("incidentid"),
+			RequiredPermission:   types.StringValue("case"),
+			DefaultSelect:        stringsToTFList([]string{"incidentid", "ticketnumber"}),
+			LookupFields:         stringsToTFList([]string{"ticketnumber"}),
+			Fields: fieldsJSONToModel(ctx, map[string]FieldHintJSON{
+				"ticketnumber": {Type: "string", Description: "Case number", ReadOnly: true},
+			}, types.MapNull(fieldObjectType()), &diags),
+			Reference: reference,
+		}
+	}
+
+	raw := modelToSchemaJSON(ctx, model(types.StringValue("ticketnumber")), &diags)
+	if diags.HasError() {
+		t.Fatalf("modelToSchemaJSON: %v", diags.Errors())
+	}
+	if !strings.Contains(string(raw), `"reference":"ticketnumber"`) {
+		t.Fatalf("reference not sent: %s", raw)
+	}
+	back := &TableResourceModel{}
+	schemaJSONToModel(ctx, raw, back, &diags)
+	if diags.HasError() {
+		t.Fatalf("schemaJSONToModel: %v", diags.Errors())
+	}
+	if got := back.Reference.ValueString(); got != "ticketnumber" {
+		t.Fatalf("reference read back as %q", got)
+	}
+
+	raw = modelToSchemaJSON(ctx, model(types.StringNull()), &diags)
+	if strings.Contains(string(raw), `"reference"`) {
+		t.Fatalf("a table with no reference sent one: %s", raw)
+	}
+	back = &TableResourceModel{}
+	schemaJSONToModel(ctx, raw, back, &diags)
+	if !back.Reference.IsNull() {
+		t.Fatalf("reference = %v, want null", back.Reference)
+	}
+}
+
+// TestInvitesRoundTrip: a table's invites and documents.upload.invites are sent
+// as written and read back the same; a table without them sends no keys and
+// reads back null, so neither shows a plan diff.
+func TestInvitesRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	var diags diag.Diagnostics
+
+	model := func(invites types.List, upload *DocumentsUploadModel) *TableResourceModel {
+		var documents *DocumentsModel
+		if upload != nil {
+			documents = &DocumentsModel{
+				Permission: types.StringValue("casedocuments"),
+				Columns:    types.MapNull(types.StringType),
+				Filters:    types.ListNull(types.StringType),
+				Upload:     upload,
+			}
+		}
+		return &TableResourceModel{
+			RouteName:            types.StringValue("casenotes"),
+			DataverseTable:       types.StringValue("annotations"),
+			DataverseLogicalName: types.StringValue("annotation"),
+			PrimaryKey:           types.StringValue("annotationid"),
+			RequiredPermission:   types.StringValue("casenotes"),
+			DefaultSelect:        stringsToTFList([]string{"annotationid"}),
+			LookupFields:         stringsToTFList([]string{"subject"}),
+			Fields:               fieldsJSONToModel(ctx, map[string]FieldHintJSON{}, types.MapNull(fieldObjectType()), &diags),
+			Invites:              invites,
+			Documents:            documents,
+		}
+	}
+	upload := func(invites types.Bool) *DocumentsUploadModel {
+		return &DocumentsUploadModel{
+			MaxBytes:   types.Int64Null(),
+			Extensions: types.ListNull(types.StringType),
+			Columns:    types.MapNull(types.StringType),
+			Invites:    invites,
+		}
+	}
+
+	raw := modelToSchemaJSON(ctx, model(stringsToTFList([]string{"create"}), upload(types.BoolValue(true))), &diags)
+	if diags.HasError() {
+		t.Fatalf("modelToSchemaJSON: %v", diags.Errors())
+	}
+	for _, want := range []string{`"invites":["create"]`, `"upload":{"invites":true}`} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("%s not sent: %s", want, raw)
+		}
+	}
+	back := &TableResourceModel{}
+	schemaJSONToModel(ctx, raw, back, &diags)
+	if diags.HasError() {
+		t.Fatalf("schemaJSONToModel: %v", diags.Errors())
+	}
+	if got := tfListToStrings(ctx, back.Invites, &diags); len(got) != 1 || got[0] != "create" {
+		t.Fatalf("invites read back as %v", got)
+	}
+	if !back.Documents.Upload.Invites.ValueBool() {
+		t.Fatalf("documents.upload.invites read back as %v", back.Documents.Upload.Invites)
+	}
+
+	// false is sent and read back as false, not dropped to null.
+	raw = modelToSchemaJSON(ctx, model(types.ListNull(types.StringType), upload(types.BoolValue(false))), &diags)
+	if strings.Contains(string(raw), `"invites":[`) || !strings.Contains(string(raw), `"upload":{"invites":false}`) {
+		t.Fatalf("unexpected invites: %s", raw)
+	}
+	back = &TableResourceModel{}
+	schemaJSONToModel(ctx, raw, back, &diags)
+	if !back.Invites.IsNull() {
+		t.Fatalf("invites = %v, want null", back.Invites)
+	}
+	if v := back.Documents.Upload.Invites; v.IsNull() || v.ValueBool() {
+		t.Fatalf("documents.upload.invites = %v, want false", v)
+	}
+
+	// Unset upload invites: no key, null back.
+	raw = modelToSchemaJSON(ctx, model(types.ListNull(types.StringType), upload(types.BoolNull())), &diags)
+	if strings.Contains(string(raw), `"invites"`) {
+		t.Fatalf("invites sent when unset: %s", raw)
+	}
+	back = &TableResourceModel{}
+	schemaJSONToModel(ctx, raw, back, &diags)
+	if !back.Documents.Upload.Invites.IsNull() {
+		t.Fatalf("documents.upload.invites = %v, want null", back.Documents.Upload.Invites)
+	}
+}

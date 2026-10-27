@@ -13,6 +13,11 @@ resource "dataversecontact_table" "case" {
   default_select = ["title", "ticketnumber", "createdon", "statuscode"]
   lookup_fields  = ["title", "ticketnumber"]
 
+  # Log the case number with every request that touches a case (or a note,
+  # document or action on it), so App Insights can be searched for the number
+  # a citizen quotes. Must be one of the fields below.
+  reference = "ticketnumber"
+
   fields = {
     title = {
       type        = "string"

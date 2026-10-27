@@ -517,13 +517,16 @@ func TestAccTable_everyAttribute(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: caseTable(s, baseFields+`
-    customerid = { type = "lookup", description = "Customer", lookup_table = "contact" }
-    parentid   = { type = "lookup", description = "Parent case", lookup_table = "case", value_field = "_parentcaseid_value" }`,
+    ticketnumber = { type = "string", description = "Case number", read_only = true }
+    customerid   = { type = "lookup", description = "Customer", lookup_table = "contact" }
+    parentid     = { type = "lookup", description = "Parent case", lookup_table = "case", value_field = "_parentcaseid_value" }`,
 					`
   description            = "Support cases"
   icon                   = "incident.svg"
   permission_group       = "support"
   fetch_xml              = "<fetch><entity name='incident'/></fetch>"
+  reference              = "ticketnumber"
+  invites                = ["create", "update"]
   aliases                = ["cases", "ticket"]
   lookup_search_contains = ["title"]
   filters                = ["statecode eq 0", "casetypecode eq 1"]
@@ -578,6 +581,7 @@ func TestAccTable_everyAttribute(t *testing.T) {
       max_bytes  = 1048576
       extensions = ["pdf"]
       columns    = { ShowOnPortal = "true", DocType = "Citizen upload" }
+      invites    = true
     }
   }
 
@@ -591,7 +595,10 @@ func TestAccTable_everyAttribute(t *testing.T) {
     }
   }`),
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("field_count"), knownvalue.Int64Exact(4)),
+					statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("field_count"), knownvalue.Int64Exact(5)),
+					statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("reference"), knownvalue.StringExact("ticketnumber")),
+					statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("invites"), knownvalue.ListExact([]knownvalue.Check{knownvalue.StringExact("create"), knownvalue.StringExact("update")})),
+					statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("documents").AtMapKey("upload").AtMapKey("invites"), knownvalue.Bool(true)),
 				},
 			},
 			{
@@ -1056,6 +1063,7 @@ func TestAccTable_documentsUpload(t *testing.T) {
 						"max_bytes":  knownvalue.Null(),
 						"extensions": knownvalue.Null(),
 						"columns":    knownvalue.Null(),
+						"invites":    knownvalue.Null(),
 					})),
 				},
 			},

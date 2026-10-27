@@ -44,6 +44,17 @@ with `documents.upload` (API 1.35.0): `maxBytes`, `extensions`, and fixed `colum
 as their declared column types (a JSON boolean, string and number), which is how the provider sends
 them. Re-record it from the live API once 1.35.0 is deployed.
 
+**From the API contract, until it ships** (`get-table-published-case-reference`): the recorded
+`get-table-published-case` with `"reference": "ticketnumber"` added (API 1.40.0): the column logged
+with every request that touches a case, so App Insights can be searched for the case number. The
+admin GET returns the hint as authored. Re-record it from the live API once 1.40.0 is deployed.
+
+**From the API contract, until it ships** (`get-table-published-case-invites`): the recorded
+`get-table-published-case-documents-upload` with `"invites": ["update"]` on the table and
+`"invites": true` in `documents.upload` (API 1.37.0): what one-time invite links may do on the
+route. The admin GET returns the hint as authored. Re-record it from the live API once 1.37.0 is
+deployed.
+
 ## Refreshing
 
 When the API changes a response, update the fixture first, then make the client and the fake

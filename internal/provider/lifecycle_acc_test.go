@@ -475,6 +475,41 @@ func TestAccPermissionsSync_removeSettings(t *testing.T) {
 	})
 }
 
+// invite_url is published as inviteUrl, and goes again when it's removed.
+func TestAccPermissionsSync_inviteURL(t *testing.T) {
+	s := fakeapi.New(t)
+	const url = "https://portal.example.gov.uk/invite#token={token}"
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		// The refusals first: the test's last config is the one it destroys with.
+		Steps: []resource.TestStep{
+			{
+				Config:      permissionsSync(s, `  invite_url = "http://portal.example.gov.uk/invite#token={token}"`),
+				ExpectError: regexp.MustCompile(`https URL`),
+			},
+			{
+				Config:      permissionsSync(s, `  invite_url = "https://portal.example.gov.uk/invite"`),
+				ExpectError: regexp.MustCompile(`https URL`),
+			},
+			{
+				Config: permissionsSync(s, `  invite_url = "`+url+`"`),
+				Check: expectDefaults(s, map[string]any{
+					"permissions":       map[string]any{},
+					"allowSelfRegister": false,
+					"inviteUrl":         url,
+				}),
+			},
+			{
+				Config: permissionsSync(s, ``),
+				Check: expectDefaults(s, map[string]any{
+					"permissions":       map[string]any{},
+					"allowSelfRegister": false,
+				}),
+			},
+		},
+	})
+}
+
 func TestAccPermissionsSync_invalidConfig(t *testing.T) {
 	s := fakeapi.New(t)
 	resource.UnitTest(t, resource.TestCase{

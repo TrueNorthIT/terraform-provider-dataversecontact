@@ -28,6 +28,11 @@ resource "dataversecontact_table" "case" {
   default_select = ["title", "ticketnumber", "createdon", "statuscode"]
   lookup_fields  = ["title", "ticketnumber"]
 
+  # Log the case number with every request that touches a case (or a note,
+  # document or action on it), so App Insights can be searched for the number
+  # a citizen quotes. Must be one of the fields below.
+  reference = "ticketnumber"
+
   fields = {
     title = {
       type        = "string"
@@ -312,6 +317,7 @@ resource "dataversecontact_table" "emails" {
 - `files` (Attributes) Downloadable files on this table's rows (a note's attachment, an email's attachments). Callers list them with GET /{tier}/{route}/{id}/files and get a short-lived download link with POST .../files/{fileId}/link; the content is never returned inline. Leave out table, primary_key and parent_column when the row is the file; set all three when the files are rows of a child table. A file on the row itself drops its content column from the table's fields. Needs Contact API 1.31.0 or later: an older API drops this key without an error. (see [below for nested schema](#nestedatt--files))
 - `filters` (List of String) Always-on filter expressions applied to every query. Defaults to ["statecode eq 0"].
 - `icon` (String) Icon filename (e.g. "incident.svg").
+- `invites` (List of String) What a one-time invite link may do on this table, for someone with no account: "create" (on a child table such as casenotes, add one row under its parent, e.g. a note on a case; on any other table, log one new row) and "update" (change named columns of one row, once). Sending one from the API needs invite plus create or write on this table at that tier (e.g. casenotes = ["invite", "create"]); officers can also send them from the Portal Access app. A contact table takes "update" only. Uploads are documents.upload.invites. Set the scope's invite_url on dataversecontact_permissions_sync so links point at the portal. Needs Contact API 1.37.0 or later.
 - `lookup_search_contains` (List of String) Lookup fields that use 'contains' instead of 'startswith'.
 - `parent_table` (Block, Optional) Parent table relationship for child record tables. (see [below for nested schema](#nestedblock--parent_table))
 - `permission_group` (String) Permission group name for shared permissions.
@@ -323,6 +329,7 @@ A target's columns are published without anyone reviewing them — that is the t
 - `public_choices` (Boolean) Whether choice/option set values are publicly accessible. Defaults to true.
 - `public_create` (Boolean) Whether unauthenticated POST is allowed on the public tier.
 - `public_read` (Boolean) Whether this table is publicly readable without authentication.
+- `reference` (String) The column people quote for a row, such as a case's "ticketnumber". Every request that touches a row of this table, or something attached to it (a note, a document upload, an action), logs the row's value as reference in App Insights, so a free-text search for the case number finds it. Must be one of fields, of type string or number. Needs Contact API 1.40.0 or later: an older API keeps the key without an error but logs nothing.
 - `required_permission` (String) The base permission name (e.g. "case"). If omitted, defaults to route_name.
 - `team_join_step` (Block List) Steps to join back to the account for team-scoped queries (ordered). (see [below for nested schema](#nestedblock--team_join_step))
 
@@ -422,6 +429,7 @@ Optional:
 
 - `columns` (Map of String) SharePoint column values set on every uploaded file, e.g. { ShowOnPortal = "true" } so an upload passes filters = ["ShowOnPortal eq true"]. Each column must be declared in documents.columns, with its value written as a string that suits the declared type: "true" or "false" for boolean, a number such as "4" for number; the provider sends each as its type. Callers can't set or override them, and if they can't be set the upload is undone.
 - `extensions` (List of String) File extensions accepted, lower case without the dot (e.g. ["pdf", "png", "jpg"]), matched case-insensitively. Leave it out for the API's default list: pdf, png, jpg, jpeg, gif, webp, heic, txt, rtf, doc, docx, xls, xlsx, csv, odt, ods. Executable types (exe, bat, cmd, com, js, msi, ps1, scr, vbs, sh, dll) are never accepted.
+- `invites` (Boolean) Let an officer send a one-time invite link to upload one document to a row, for someone with no account (the invite tier: POST /invite/{route}/{id}/documents/uploads, then .../{uploadId}/complete). Sending one from the API needs invite and create on the documents permission at that tier (e.g. casedocuments = ["invite", "create"]); officers can also send them from the Portal Access app. Set the scope's invite_url on dataversecontact_permissions_sync so links point at the portal. Needs Contact API 1.37.0 or later.
 - `max_bytes` (Number) Largest file accepted, in bytes. Leave it out for 10485760 (10 MiB). Uploads are also capped by the deployment's DOCUMENT_UPLOAD_MAX_BYTES (26214400 = 25 MiB by default), so a larger value only applies where the deployment raised that.
 
 
