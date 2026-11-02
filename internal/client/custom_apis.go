@@ -10,7 +10,7 @@ import (
 func (c *Client) GetCustomApiDefinitions(ctx context.Context, scope string) (*CustomApiDefinitionsResponse, error) {
 	url := c.adminURL(scope, "custom-api-definitions")
 	var resp CustomApiDefinitionsResponse
-	if err := c.doJSON(ctx, "GET", url, nil, &resp); err != nil {
+	if err := c.doJSON(ctx, "GET", scope, url, nil, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -20,7 +20,7 @@ func (c *Client) GetCustomApiDefinitions(ctx context.Context, scope string) (*Cu
 func (c *Client) GetCustomApi(ctx context.Context, scope, routeName string) (*CustomApiManagerResponse, error) {
 	url := c.adminURL(scope, fmt.Sprintf("custom-api-manager/%s", routeName))
 	var resp CustomApiManagerResponse
-	if err := c.doJSON(ctx, "GET", url, nil, &resp); err != nil {
+	if err := c.doJSON(ctx, "GET", scope, url, nil, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -30,7 +30,7 @@ func (c *Client) GetCustomApi(ctx context.Context, scope, routeName string) (*Cu
 func (c *Client) SaveCustomApiDraft(ctx context.Context, scope, routeName string, schemaJSON json.RawMessage) (*CustomApiSaveDraftResponse, error) {
 	url := c.adminURL(scope, fmt.Sprintf("custom-api-manager/%s", routeName))
 	var resp CustomApiSaveDraftResponse
-	if err := c.doJSON(ctx, "PUT", url, schemaJSON, &resp); err != nil {
+	if err := c.doJSON(ctx, "PUT", scope, url, schemaJSON, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -39,7 +39,7 @@ func (c *Client) SaveCustomApiDraft(ctx context.Context, scope, routeName string
 // DiscardCustomApiDraft discards a custom API's draft.
 func (c *Client) DiscardCustomApiDraft(ctx context.Context, scope, routeName string) error {
 	url := c.adminURL(scope, fmt.Sprintf("custom-api-manager/%s", routeName))
-	_, _, err := c.doRequest(ctx, "DELETE", url, nil)
+	_, _, err := c.doRequest(ctx, "DELETE", scope, url, nil)
 	return err
 }
 
@@ -48,7 +48,7 @@ func (c *Client) PublishCustomApis(ctx context.Context, scope string, apis []str
 	url := c.adminURL(scope, "custom-api-manager/publish")
 	body := CustomApiPublishRequest{Apis: apis}
 	var resp CustomApiPublishResponse
-	if err := c.doJSON(ctx, "POST", url, body, &resp); err != nil {
+	if err := c.doJSON(ctx, "POST", scope, url, body, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -59,7 +59,7 @@ func (c *Client) RemoveCustomApis(ctx context.Context, scope string, apis []stri
 	url := c.adminURL(scope, "custom-api-manager/remove")
 	body := CustomApiRemoveRequest{Apis: apis}
 	var resp CustomApiRemoveResponse
-	if err := c.doJSON(ctx, "POST", url, body, &resp); err != nil {
+	if err := c.doJSON(ctx, "POST", scope, url, body, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -68,7 +68,7 @@ func (c *Client) RemoveCustomApis(ctx context.Context, scope string, apis []stri
 // PermanentlyDeleteCustomApi permanently deletes a custom API from the recycle bin.
 func (c *Client) PermanentlyDeleteCustomApi(ctx context.Context, scope, routeName string) error {
 	url := c.adminURL(scope, fmt.Sprintf("custom-api-manager/recycled/%s", routeName))
-	_, _, err := c.doRequest(ctx, "DELETE", url, nil)
+	_, _, err := c.doRequest(ctx, "DELETE", scope, url, nil)
 	return err
 }
 

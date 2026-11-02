@@ -66,7 +66,7 @@ func TestDoRequestSetsAuthHeader(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient(server.URL, "my-secret-key")
-	_, _, err := c.doRequest(context.Background(), "GET", server.URL+"/test", nil)
+	_, _, err := c.doRequest(context.Background(), "GET", "default", server.URL+"/test", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestDoRequestSetsContentType(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient(server.URL, "key")
-	_, _, err := c.doRequest(context.Background(), "PUT", server.URL+"/test", map[string]string{"key": "value"})
+	_, _, err := c.doRequest(context.Background(), "PUT", "default", server.URL+"/test", map[string]string{"key": "value"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestDoRequestHandlesAPIError(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient(server.URL, "key")
-	_, statusCode, err := c.doRequest(context.Background(), "GET", server.URL+"/test", nil)
+	_, statusCode, err := c.doRequest(context.Background(), "GET", "default", server.URL+"/test", nil)
 
 	if err == nil {
 		t.Fatal("expected error for 404 response")

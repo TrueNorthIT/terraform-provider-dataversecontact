@@ -17,7 +17,9 @@ With it, a whole portal backend (e.g. a citizen booking service) can be
 provisioned with `terraform apply`, reviewed in version control, and reproduced
 in a new environment in minutes.
 
-New here? Start with the [Getting started](guides/getting-started) guide. The
+New here? Start with the [Getting started](guides/getting-started) guide, and
+[Signing in](guides/authentication) for running it from your machine or a
+pipeline. The
 [Permissions](guides/permissions) and
 [Parent-scoped children](guides/parent-scoped-children) guides cover the two
 concepts that most often trip people up. [Custom APIs](guides/custom-apis)
@@ -27,10 +29,13 @@ covers who may call a Dataverse function or action, and on which record.
 
 {{ tffile "examples/provider/provider.tf" }}
 
-Authentication is the pre-shared admin connection key, sent as the admin Bearer
-token. It must be byte-identical to `ADMIN_CONNECTION_KEY` on the API
-deployment. Prefer supplying it via the `DATAVERSE_CONTACT_CONNECTION_KEY`
-environment variable rather than in configuration.
+The provider signs in to the API's admin endpoints with the admin connection
+key when one is set (`DATAVERSE_CONTACT_CONNECTION_KEY`, which must match
+`ADMIN_CONNECTION_KEY` on the API deployment). Without one it signs in with
+Microsoft Entra ID: your `az login` on your own machine, or workload identity
+federation in an Azure DevOps or GitHub Actions pipeline, where no secret is
+stored. [Signing in](guides/authentication) covers each way, including
+pipelines and Dataverse in another tenant.
 
 Each request gets `timeout` (default 60 seconds) per attempt and is retried up
 to `max_retries` times (default 3) with a growing wait when the API doesn't

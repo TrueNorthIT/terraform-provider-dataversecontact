@@ -30,8 +30,12 @@ const (
 
 // Client is the HTTP client for the Dataverse Contact API.
 type Client struct {
-	BaseURL    string
-	APIKey     string
+	BaseURL string
+	// APIKey is the admin connection key, sent as the Bearer token.
+	APIKey string
+	// Entra, when set, signs requests in with Microsoft Entra ID instead of
+	// APIKey.
+	Entra      *EntraAuth
 	HTTPClient *http.Client
 	// MaxRetries is how many more times a request is sent after a failure
 	// that is safe to retry (see retryable). 0 sends every request once.
@@ -52,14 +56,38 @@ func NewClient(baseURL, apiKey string) *Client {
 	}
 }
 
+// NewEntraClient creates a client that signs in with Microsoft Entra ID.
+func NewEntraClient(baseURL string, auth *EntraAuth) *Client {
+	c := NewClient(baseURL, "")
+	c.Entra = auth
+	return c
+}
+
 // adminURL builds the full URL for an admin endpoint.
 func (c *Client) adminURL(scope, path string) string {
 	return fmt.Sprintf("%s/api/v2/_admin/%s/%s", c.BaseURL, scope, path)
 }
 
-// doRequest executes an HTTP request with auth and logging, retrying the
-// failures retryable allows for its method.
-func (c *Client) doRequest(ctx context.Context, method, url string, body interface{}) ([]byte, int, error) {
+// authorization is the Authorization header for a request to scope's admin
+// endpoints. scope "" is a public endpoint, which an Entra client calls
+// without one; the connection key is sent everywhere, as it always was.
+func (c *Client) authorization(ctx context.Context, scope string) (string, error) {
+	if c.Entra == nil {
+		return "Bearer " + c.APIKey, nil
+	}
+	if scope == "" {
+		return "", nil
+	}
+	token, err := c.Entra.token(ctx, c, scope)
+	if err != nil {
+		return "", err
+	}
+	return "Bearer " + token, nil
+}
+
+// doRequest executes an HTTP request for scope with auth and logging,
+// retrying the failures retryable allows for its method.
+func (c *Client) doRequest(ctx context.Context, method, scope, url string, body interface{}) ([]byte, int, error) {
 	var payload []byte
 	if body != nil {
 		var err error
@@ -81,7 +109,15 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body interfa
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to create request: %w", err)
 		}
-		req.Header.Set("Authorization", "Bearer "+c.APIKey)
+		// Asked for on every attempt, so a retry after a long wait doesn't
+		// carry a token that has since expired. A cached one costs nothing.
+		authz, err := c.authorization(ctx, scope)
+		if err != nil {
+			return nil, 0, err
+		}
+		if authz != "" {
+			req.Header.Set("Authorization", authz)
+		}
 		if payload != nil {
 			req.Header.Set("Content-Type", "application/json")
 		}
@@ -94,6 +130,9 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body interfa
 		}
 		if err == nil && status >= 400 {
 			err = statusError(status, respBody)
+			if status == http.StatusUnauthorized && c.Entra != nil {
+				err = fmt.Errorf("%w (signed in with %s)", err, c.Entra.Method)
+			}
 		}
 		if err == nil {
 			return respBody, status, nil
@@ -259,8 +298,8 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 }
 
 // doJSON executes a request and unmarshals the response into the target.
-func (c *Client) doJSON(ctx context.Context, method, url string, body interface{}, target interface{}) error {
-	respBody, _, err := c.doRequest(ctx, method, url, body)
+func (c *Client) doJSON(ctx context.Context, method, scope, url string, body interface{}, target interface{}) error {
+	respBody, _, err := c.doRequest(ctx, method, scope, url, body)
 	if err != nil {
 		return err
 	}

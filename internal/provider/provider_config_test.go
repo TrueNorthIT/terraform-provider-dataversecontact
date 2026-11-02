@@ -20,6 +20,17 @@ import (
 // set, plus attrs, and returns the client it built.
 func configure(t *testing.T, attrs map[string]tftypes.Value) (*client.Client, string) {
 	t.Helper()
+	c, resp := configureResp(t, attrs)
+	var errs []string
+	for _, d := range resp.Diagnostics.Errors() {
+		errs = append(errs, d.Summary()+": "+d.Detail())
+	}
+	return c, strings.Join(errs, "; ")
+}
+
+// configureResp is configure returning the whole response, warnings included.
+func configureResp(t *testing.T, attrs map[string]tftypes.Value) (*client.Client, provider.ConfigureResponse) {
+	t.Helper()
 	ctx := context.Background()
 	p := New("test")()
 	var schemaResp provider.SchemaResponse
@@ -40,12 +51,8 @@ func configure(t *testing.T, attrs map[string]tftypes.Value) (*client.Client, st
 	p.Configure(ctx, provider.ConfigureRequest{
 		Config: tfsdk.Config{Schema: schemaResp.Schema, Raw: tftypes.NewValue(typ, vals)},
 	}, &resp)
-	var errs []string
-	for _, d := range resp.Diagnostics.Errors() {
-		errs = append(errs, d.Summary()+": "+d.Detail())
-	}
 	c, _ := resp.ResourceData.(*client.Client)
-	return c, strings.Join(errs, "; ")
+	return c, resp
 }
 
 // #29: timeout and max_retries, from the provider block or the environment.

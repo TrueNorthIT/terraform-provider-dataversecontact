@@ -18,14 +18,17 @@ Its users are developers and platform engineers at TrueNorth IT or at a council,
 - **`internal/datasources`** — read-only data sources: `scopes`, `table`, `table_definitions`.
 - **`examples/`** — usage examples per resource/data source plus a full-scope example.
 
-Authentication is the pre-shared admin connection key, sent as the admin Bearer token (`connection_key`, or `DATAVERSE_CONTACT_CONNECTION_KEY` via a runner script). One key administers every scope; it must be byte-identical to `ADMIN_CONNECTION_KEY` on the API deployment.
+The provider signs in one of two ways (`internal/provider/credentials.go`, `internal/client/entra.go`):
+
+- **Admin connection key** (`connection_key`, or `DATAVERSE_CONTACT_CONNECTION_KEY`), sent as the Bearer token. It must be byte-identical to `ADMIN_CONNECTION_KEY` on the API deployment, and one key administers every scope. When set, it always wins, so existing configurations behave exactly as before.
+- **Microsoft Entra ID** when there is no key: workload identity federation from Azure DevOps or GitHub Actions (`use_oidc`), a managed identity (`use_msi`), or the Azure CLI (`use_cli`, on by default), with azurerm's `ARM_*` variable names. The API validates each scope's admin token against that scope's own tenant and Dataverse, so the client reads `scopeAuth` from the public `GET /_admin/scopes` once, gets a token per (tenant, Dataverse), caches it until five minutes before expiry, and lets concurrent requests share one sign-in (the Azure CLI starts a process per token). A scope the API doesn't list yet signs in as `default`. The API authorises the identity from its Dataverse roles (System Customizer or System Administrator).
 
 ```
 Terraform config (.tf)
         │ plan/apply
         ▼
 terraform-provider-dataversecontact (Go)
-        │ Admin REST calls (Bearer: connection key)
+        │ Admin REST calls (Bearer: connection key, or an Entra token per scope)
         ▼
 Dataverse Contact API  ──►  Microsoft Dataverse (table metadata, custom APIs)
                        └──►  Azure Blob (published/<scope>/… config + defaults.json)

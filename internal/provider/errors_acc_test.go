@@ -119,7 +119,8 @@ func TestAccDataSources_apiFailures(t *testing.T) {
 
 func TestAccProvider_configuration(t *testing.T) {
 	s := fakeapi.New(t)
-	for _, v := range []string{"DATAVERSE_CONTACT_API_URL", "DATAVERSE_CONTACT_CONNECTION_KEY", "DATAVERSE_CONTACT_API_KEY"} {
+	t.Setenv("DATAVERSE_CONTACT_API_URL", "")
+	for _, v := range signInEnv {
 		t.Setenv(v, "")
 	}
 	scopes := `
@@ -133,8 +134,12 @@ data "dataversecontact_scopes" "all" {}
 				ExpectError: regexp.MustCompile(`Missing API URL`),
 			},
 			{
-				Config:      `provider "dataversecontact" { api_url = "` + s.URL + `" }` + scopes,
-				ExpectError: regexp.MustCompile(`Missing Admin Connection Key`),
+				// No key, and the Azure CLI fallback turned off.
+				Config: `provider "dataversecontact" {
+  api_url = "` + s.URL + `"
+  use_cli = false
+}` + scopes,
+				ExpectError: regexp.MustCompile(`No way to sign in`),
 			},
 			{
 				// The deprecated api_key still authenticates.

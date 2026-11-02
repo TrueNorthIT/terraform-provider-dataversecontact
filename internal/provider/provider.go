@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -30,11 +31,17 @@ type DataverseContactProvider struct {
 
 // DataverseContactProviderModel describes the provider data model.
 type DataverseContactProviderModel struct {
-	APIURL        types.String `tfsdk:"api_url"`
-	ConnectionKey types.String `tfsdk:"connection_key"`
-	APIKey        types.String `tfsdk:"api_key"`
-	Timeout       types.String `tfsdk:"timeout"`
-	MaxRetries    types.Int64  `tfsdk:"max_retries"`
+	APIURL                 types.String `tfsdk:"api_url"`
+	ConnectionKey          types.String `tfsdk:"connection_key"`
+	APIKey                 types.String `tfsdk:"api_key"`
+	TenantID               types.String `tfsdk:"tenant_id"`
+	ClientID               types.String `tfsdk:"client_id"`
+	UseOIDC                types.Bool   `tfsdk:"use_oidc"`
+	ADOServiceConnectionID types.String `tfsdk:"ado_pipeline_service_connection_id"`
+	UseMSI                 types.Bool   `tfsdk:"use_msi"`
+	UseCLI                 types.Bool   `tfsdk:"use_cli"`
+	Timeout                types.String `tfsdk:"timeout"`
+	MaxRetries             types.Int64  `tfsdk:"max_retries"`
 }
 
 // New returns a new provider factory function.
@@ -54,10 +61,11 @@ func (p *DataverseContactProvider) Metadata(_ context.Context, _ provider.Metada
 func (p *DataverseContactProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Terraform provider for managing Dataverse Contact API table schemas, custom APIs, and permissions.\n\n" +
-			"Authentication uses a static admin connection key. Mint an admin connection key on the API side, " +
-			"set it as the `ADMIN_CONNECTION_KEY` environment variable on the API deployment, and pass the same " +
-			"value here as `connection_key` (or via the `DATAVERSE_CONTACT_CONNECTION_KEY` environment variable). " +
-			"The provider sends it as an `Authorization: Bearer <key>` header on every admin request.",
+			"The provider signs in to the API's admin endpoints in one of two ways. With the admin connection key " +
+			"(`connection_key`), it sends the API's `ADMIN_CONNECTION_KEY` as the Bearer token. Without one, it signs " +
+			"in with Microsoft Entra ID: your Azure CLI login, a pipeline's workload identity federation " +
+			"(`use_oidc`) or a managed identity (`use_msi`). The identity must be a user or application user in " +
+			"each scope's Dataverse with System Customizer or System Administrator.",
 		Attributes: map[string]schema.Attribute{
 			"api_url": schema.StringAttribute{
 				Description: "Base URL of the Dataverse Contact API (e.g. https://api.dataverse-contact.tnapps.co.uk). " +
@@ -67,9 +75,49 @@ func (p *DataverseContactProvider) Schema(_ context.Context, _ provider.SchemaRe
 			"connection_key": schema.StringAttribute{
 				Description: "Admin connection key (Bearer token) for authenticating with the admin endpoints. " +
 					"This is the same value configured as ADMIN_CONNECTION_KEY on the API deployment. " +
-					"Can also be set with the DATAVERSE_CONTACT_CONNECTION_KEY environment variable.",
+					"Can also be set with the DATAVERSE_CONTACT_CONNECTION_KEY environment variable. " +
+					"When it is set, the provider uses it and ignores the Microsoft Entra settings.",
 				Optional:  true,
 				Sensitive: true,
+			},
+			"tenant_id": schema.StringAttribute{
+				Description: "Microsoft Entra tenant to sign in to when the API doesn't say. The provider asks the API " +
+					"which tenant each scope signs in to, so this is rarely needed. " +
+					"Can also be set with the ARM_TENANT_ID environment variable.",
+				Optional: true,
+			},
+			"client_id": schema.StringAttribute{
+				Description: "Application (client) ID to sign in as: the app registration behind the pipeline's " +
+					"federated credential (use_oidc), or a user-assigned managed identity (use_msi). " +
+					"Can also be set with the ARM_CLIENT_ID environment variable.",
+				Optional: true,
+			},
+			"use_oidc": schema.BoolAttribute{
+				Description: "Sign in as an app registration through workload identity federation, from an Azure DevOps " +
+					"service connection (with ado_pipeline_service_connection_id), a GitHub Actions workflow, or a token " +
+					"the pipeline fetched itself (the ARM_OIDC_TOKEN or ARM_OIDC_TOKEN_FILE_PATH environment variable). " +
+					"Nothing secret is stored. Needs client_id. Defaults to false. " +
+					"Can also be set with the ARM_USE_OIDC environment variable.",
+				Optional: true,
+			},
+			"ado_pipeline_service_connection_id": schema.StringAttribute{
+				Description: "In Azure DevOps, the ID of the Azure Resource Manager service connection (workload identity " +
+					"federation) to sign in through, with use_oidc. The step must also map SYSTEM_ACCESSTOKEN: " +
+					"$(System.AccessToken). Can also be set with the ARM_ADO_PIPELINE_SERVICE_CONNECTION_ID or " +
+					"ARM_OIDC_AZURE_SERVICE_CONNECTION_ID environment variable.",
+				Optional: true,
+			},
+			"use_msi": schema.BoolAttribute{
+				Description: "Sign in with the managed identity of the machine running Terraform, such as a self-hosted " +
+					"agent on an Azure VM. Set client_id for a user-assigned identity. Defaults to false. " +
+					"Can also be set with the ARM_USE_MSI environment variable.",
+				Optional: true,
+			},
+			"use_cli": schema.BoolAttribute{
+				Description: "Sign in with your Azure CLI login (az login) when there is no connection key and neither " +
+					"use_oidc nor use_msi is set. Defaults to true. " +
+					"Can also be set with the ARM_USE_CLI environment variable.",
+				Optional: true,
 			},
 			"api_key": schema.StringAttribute{
 				Description: "Deprecated: use connection_key instead. Legacy static API key (Bearer token). " +
@@ -137,17 +185,30 @@ func (p *DataverseContactProvider) Configure(ctx context.Context, req provider.C
 		}
 	}
 
-	if connectionKey == "" {
-		resp.Diagnostics.AddError(
-			"Missing Admin Connection Key",
-			"The provider requires an admin connection key. Set connection_key in the provider "+
-				"configuration or the DATAVERSE_CONTACT_CONNECTION_KEY environment variable. This must "+
-				"match the ADMIN_CONNECTION_KEY configured on the API deployment.",
-		)
-		return
+	// The key, when there is one, signs every request exactly as it always
+	// has. Without one, the provider signs in with Microsoft Entra ID.
+	var c *client.Client
+	if connectionKey != "" {
+		if configuredTrue(config.UseOIDC) || configuredTrue(config.UseMSI) {
+			resp.Diagnostics.AddWarning("Connection key in use",
+				"connection_key is set, so the provider signs in with it and ignores use_oidc and use_msi. "+
+					"Remove the key (and DATAVERSE_CONTACT_CONNECTION_KEY) to sign in with Microsoft Entra ID.")
+		}
+		c = client.NewClient(apiURL, connectionKey)
+	} else {
+		auth, err := entraAuthFor(config)
+		if err != nil {
+			var se *settingError
+			if errors.As(err, &se) {
+				resp.Diagnostics.AddError(se.summary, se.detail)
+			} else {
+				resp.Diagnostics.AddError("Can't sign in", err.Error())
+			}
+			return
+		}
+		tflog.Info(ctx, "No connection key; signing in with Microsoft Entra ID", map[string]interface{}{"method": auth.Method})
+		c = client.NewEntraClient(apiURL, auth)
 	}
-
-	c := client.NewClient(apiURL, connectionKey)
 
 	if timeout, ok := resolveTimeout(config.Timeout, resp); ok {
 		c.HTTPClient.Timeout = timeout
@@ -161,6 +222,20 @@ func (p *DataverseContactProvider) Configure(ctx context.Context, req provider.C
 
 	resp.DataSourceData = c
 	resp.ResourceData = c
+}
+
+// entraAuthFor reads the Entra settings and picks the way to sign in. Tests
+// replace it to sign in with a fake credential.
+var entraAuthFor = func(config DataverseContactProviderModel) (*client.EntraAuth, error) {
+	s, err := resolveEntraSettings(config)
+	if err != nil {
+		return nil, err
+	}
+	return s.entraAuth()
+}
+
+func configuredTrue(v types.Bool) bool {
+	return !v.IsNull() && !v.IsUnknown() && v.ValueBool()
 }
 
 // positiveDuration checks a configured timeout at validate time. Configure
