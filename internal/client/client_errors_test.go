@@ -16,12 +16,12 @@ import (
 func TestDoRequestFailures(t *testing.T) {
 	ctx := context.Background()
 
-	if _, _, err := NewClient("http://x", "k").doRequest(ctx, "PUT", "http://x/", make(chan int)); err == nil ||
+	if _, _, err := NewClient("http://x", "k").doRequest(ctx, "PUT", "default", "http://x/", make(chan int)); err == nil ||
 		!strings.Contains(err.Error(), "marshal") {
 		t.Errorf("unmarshalable body: %v", err)
 	}
 
-	if _, _, err := NewClient("http://x", "k").doRequest(ctx, "GET", "://bad", nil); err == nil ||
+	if _, _, err := NewClient("http://x", "k").doRequest(ctx, "GET", "default", "://bad", nil); err == nil ||
 		!strings.Contains(err.Error(), "create request") {
 		t.Errorf("bad URL: %v", err)
 	}

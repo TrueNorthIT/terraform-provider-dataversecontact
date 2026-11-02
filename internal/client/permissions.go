@@ -32,7 +32,7 @@ func (c *Client) PublishDefaults(ctx context.Context, scope string, permissions 
 		InviteURL:          inviteURL,
 	}
 	var resp PublishDefaultsResponse
-	if err := c.doJSON(ctx, "PUT", url, body, &resp); err != nil {
+	if err := c.doJSON(ctx, "PUT", scope, url, body, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -40,10 +40,12 @@ func (c *Client) PublishDefaults(ctx context.Context, scope string, permissions 
 
 // GetScopes returns all available scopes.
 func (c *Client) GetScopes(ctx context.Context) (*ScopesResponse, error) {
-	// The scopes listing is exposed at /api/v2/_admin/scopes (no scope segment).
+	// The scopes listing is exposed at /api/v2/_admin/scopes (no scope
+	// segment). It is public: it says where each scope signs in, so it has to
+	// be readable before signing in.
 	url := fmt.Sprintf("%s/api/v2/_admin/scopes", c.BaseURL)
 	var resp ScopesResponse
-	if err := c.doJSON(ctx, "GET", url, nil, &resp); err != nil {
+	if err := c.doJSON(ctx, "GET", "", url, nil, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil

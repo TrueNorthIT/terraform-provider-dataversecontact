@@ -9,6 +9,7 @@ gets in each scope.
 
 **Registry docs:** <https://registry.terraform.io/providers/TrueNorthIT/dataversecontact/latest/docs>
 · [Getting started](https://registry.terraform.io/providers/TrueNorthIT/dataversecontact/latest/docs/guides/getting-started)
+· [Signing in](https://registry.terraform.io/providers/TrueNorthIT/dataversecontact/latest/docs/guides/authentication)
 · [Permissions](https://registry.terraform.io/providers/TrueNorthIT/dataversecontact/latest/docs/guides/permissions)
 · [Parent-scoped children](https://registry.terraform.io/providers/TrueNorthIT/dataversecontact/latest/docs/guides/parent-scoped-children)
 · [Custom APIs](https://registry.terraform.io/providers/TrueNorthIT/dataversecontact/latest/docs/guides/custom-apis)
@@ -23,13 +24,14 @@ terraform {
   required_providers {
     dataversecontact = {
       source  = "TrueNorthIT/dataversecontact"
-      version = "~> 1.0"
+      version = "~> 1.8"
     }
   }
 }
 
-# connection_key comes from DATAVERSE_CONTACT_CONNECTION_KEY — keep it out of
-# config. It must match ADMIN_CONNECTION_KEY on the API deployment.
+# Signs in with your az login, or a pipeline's workload identity federation.
+# Set DATAVERSE_CONTACT_CONNECTION_KEY (the API's ADMIN_CONNECTION_KEY) to use
+# the key instead. See the "Signing in" guide.
 provider "dataversecontact" {
   api_url = "https://api.dataverse-contact.tnapps.co.uk"
 }

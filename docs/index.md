@@ -17,7 +17,9 @@ With it, a whole portal backend (e.g. a citizen booking service) can be
 provisioned with `terraform apply`, reviewed in version control, and reproduced
 in a new environment in minutes.
 
-New here? Start with the [Getting started](guides/getting-started) guide. The
+New here? Start with the [Getting started](guides/getting-started) guide, and
+[Signing in](guides/authentication) for running it from your machine or a
+pipeline. The
 [Permissions](guides/permissions) and
 [Parent-scoped children](guides/parent-scoped-children) guides cover the two
 concepts that most often trip people up. [Custom APIs](guides/custom-apis)
@@ -30,24 +32,29 @@ terraform {
   required_providers {
     dataversecontact = {
       source  = "TrueNorthIT/dataversecontact"
-      version = "~> 1.0"
+      version = "~> 1.8"
     }
   }
 }
 
-# Both settings can come from the environment instead:
-#   DATAVERSE_CONTACT_API_URL
-#   DATAVERSE_CONTACT_CONNECTION_KEY  (the admin key — keep it out of config)
-# The connection key must match ADMIN_CONNECTION_KEY on the API deployment.
+# api_url can come from DATAVERSE_CONTACT_API_URL instead.
+#
+# Signing in: with DATAVERSE_CONTACT_CONNECTION_KEY set (the API's
+# ADMIN_CONNECTION_KEY), the provider uses the key. Without it, the provider
+# uses your az login, or in a pipeline the ARM_USE_OIDC / ARM_CLIENT_ID /
+# ARM_ADO_PIPELINE_SERVICE_CONNECTION_ID variables azurerm uses.
 provider "dataversecontact" {
   api_url = "https://api.dataverse-contact.tnapps.co.uk"
 }
 ```
 
-Authentication is the pre-shared admin connection key, sent as the admin Bearer
-token. It must be byte-identical to `ADMIN_CONNECTION_KEY` on the API
-deployment. Prefer supplying it via the `DATAVERSE_CONTACT_CONNECTION_KEY`
-environment variable rather than in configuration.
+The provider signs in to the API's admin endpoints with the admin connection
+key when one is set (`DATAVERSE_CONTACT_CONNECTION_KEY`, which must match
+`ADMIN_CONNECTION_KEY` on the API deployment). Without one it signs in with
+Microsoft Entra ID: your `az login` on your own machine, or workload identity
+federation in an Azure DevOps or GitHub Actions pipeline, where no secret is
+stored. [Signing in](guides/authentication) covers each way, including
+pipelines and Dataverse in another tenant.
 
 Each request gets `timeout` (default 60 seconds) per attempt and is retried up
 to `max_retries` times (default 3) with a growing wait when the API doesn't
@@ -67,8 +74,14 @@ A scope with no published defaults grants nothing — every route answers
 
 ### Optional
 
+- `ado_pipeline_service_connection_id` (String) In Azure DevOps, the ID of the Azure Resource Manager service connection (workload identity federation) to sign in through, with use_oidc. The step must also map SYSTEM_ACCESSTOKEN: $(System.AccessToken). Can also be set with the ARM_ADO_PIPELINE_SERVICE_CONNECTION_ID or ARM_OIDC_AZURE_SERVICE_CONNECTION_ID environment variable.
 - `api_key` (String, Sensitive, Deprecated) Deprecated: use connection_key instead. Legacy static API key (Bearer token). Can also be set with the DATAVERSE_CONTACT_API_KEY environment variable.
 - `api_url` (String) Base URL of the Dataverse Contact API (e.g. https://api.dataverse-contact.tnapps.co.uk). Can also be set with the DATAVERSE_CONTACT_API_URL environment variable.
-- `connection_key` (String, Sensitive) Admin connection key (Bearer token) for authenticating with the admin endpoints. This is the same value configured as ADMIN_CONNECTION_KEY on the API deployment. Can also be set with the DATAVERSE_CONTACT_CONNECTION_KEY environment variable.
+- `client_id` (String) Application (client) ID to sign in as: the app registration behind the pipeline's federated credential (use_oidc), or a user-assigned managed identity (use_msi). Can also be set with the ARM_CLIENT_ID environment variable.
+- `connection_key` (String, Sensitive) Admin connection key (Bearer token) for authenticating with the admin endpoints. This is the same value configured as ADMIN_CONNECTION_KEY on the API deployment. Can also be set with the DATAVERSE_CONTACT_CONNECTION_KEY environment variable. When it is set, the provider uses it and ignores the Microsoft Entra settings.
 - `max_retries` (Number) How many times a request is retried after a failure that is safe to retry: no response (including an attempt that ran out of time), 429, 502, 503 or 504 for reads, saves and deletes, and only 429 for publish, unpublish and remove. 0 disables retries. Defaults to 3. Can also be set with the DATAVERSE_CONTACT_MAX_RETRIES environment variable.
+- `tenant_id` (String) Microsoft Entra tenant to sign in to when the API doesn't say. The provider asks the API which tenant each scope signs in to, so this is rarely needed. Can also be set with the ARM_TENANT_ID environment variable.
 - `timeout` (String) How long each attempt at an API request may take, as a Go duration such as "90s" or "2m". A retried request gets this long for every attempt. Defaults to "60s". Can also be set with the DATAVERSE_CONTACT_TIMEOUT environment variable.
+- `use_cli` (Boolean) Sign in with your Azure CLI login (az login) when there is no connection key and neither use_oidc nor use_msi is set. Defaults to true. Can also be set with the ARM_USE_CLI environment variable.
+- `use_msi` (Boolean) Sign in with the managed identity of the machine running Terraform, such as a self-hosted agent on an Azure VM. Set client_id for a user-assigned identity. Defaults to false. Can also be set with the ARM_USE_MSI environment variable.
+- `use_oidc` (Boolean) Sign in as an app registration through workload identity federation, from an Azure DevOps service connection (with ado_pipeline_service_connection_id), a GitHub Actions workflow, or a token the pipeline fetched itself (the ARM_OIDC_TOKEN or ARM_OIDC_TOKEN_FILE_PATH environment variable). Nothing secret is stored. Needs client_id. Defaults to false. Can also be set with the ARM_USE_OIDC environment variable.

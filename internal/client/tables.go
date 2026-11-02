@@ -13,7 +13,7 @@ import (
 func (c *Client) GetTableDefinitions(ctx context.Context, scope string) (*TableDefinitionsResponse, error) {
 	url := c.adminURL(scope, "table-definitions")
 	var resp TableDefinitionsResponse
-	if err := c.doJSON(ctx, "GET", url, nil, &resp); err != nil {
+	if err := c.doJSON(ctx, "GET", scope, url, nil, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -23,7 +23,7 @@ func (c *Client) GetTableDefinitions(ctx context.Context, scope string) (*TableD
 func (c *Client) GetTable(ctx context.Context, scope, routeName string) (*TableManagerResponse, error) {
 	url := c.adminURL(scope, fmt.Sprintf("table-manager/%s", routeName))
 	var resp TableManagerResponse
-	if err := c.doJSON(ctx, "GET", url, nil, &resp); err != nil {
+	if err := c.doJSON(ctx, "GET", scope, url, nil, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -33,7 +33,7 @@ func (c *Client) GetTable(ctx context.Context, scope, routeName string) (*TableM
 func (c *Client) SaveTableDraft(ctx context.Context, scope, routeName string, schemaJSON json.RawMessage) (*SaveDraftResponse, error) {
 	url := c.adminURL(scope, fmt.Sprintf("table-manager/%s", routeName))
 	var resp SaveDraftResponse
-	if err := c.doJSON(ctx, "PUT", url, schemaJSON, &resp); err != nil {
+	if err := c.doJSON(ctx, "PUT", scope, url, schemaJSON, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -42,7 +42,7 @@ func (c *Client) SaveTableDraft(ctx context.Context, scope, routeName string, sc
 // DiscardTableDraft discards a table's draft.
 func (c *Client) DiscardTableDraft(ctx context.Context, scope, routeName string) error {
 	url := c.adminURL(scope, fmt.Sprintf("table-manager/%s", routeName))
-	_, _, err := c.doRequest(ctx, "DELETE", url, nil)
+	_, _, err := c.doRequest(ctx, "DELETE", scope, url, nil)
 	return err
 }
 
@@ -51,7 +51,7 @@ func (c *Client) PublishTables(ctx context.Context, scope string, tables []strin
 	url := c.adminURL(scope, "table-manager/publish")
 	body := PublishRequest{Tables: tables}
 	var resp PublishResponse
-	if err := c.doJSON(ctx, "POST", url, body, &resp); err != nil {
+	if err := c.doJSON(ctx, "POST", scope, url, body, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -62,7 +62,7 @@ func (c *Client) UnpublishTables(ctx context.Context, scope string, tables []str
 	url := c.adminURL(scope, "table-manager/unpublish")
 	body := UnpublishRequest{Tables: tables}
 	var resp UnpublishResponse
-	if err := c.doJSON(ctx, "POST", url, body, &resp); err != nil {
+	if err := c.doJSON(ctx, "POST", scope, url, body, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -73,7 +73,7 @@ func (c *Client) RemoveTables(ctx context.Context, scope string, tables []string
 	url := c.adminURL(scope, "table-manager/remove")
 	body := RemoveRequest{Tables: tables}
 	var resp RemoveResponse
-	if err := c.doJSON(ctx, "POST", url, body, &resp); err != nil {
+	if err := c.doJSON(ctx, "POST", scope, url, body, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -82,7 +82,7 @@ func (c *Client) RemoveTables(ctx context.Context, scope string, tables []string
 // PermanentlyDeleteTable permanently deletes a table from the recycle bin.
 func (c *Client) PermanentlyDeleteTable(ctx context.Context, scope, routeName string) error {
 	url := c.adminURL(scope, fmt.Sprintf("table-manager/recycled/%s", routeName))
-	_, _, err := c.doRequest(ctx, "DELETE", url, nil)
+	_, _, err := c.doRequest(ctx, "DELETE", scope, url, nil)
 	return err
 }
 

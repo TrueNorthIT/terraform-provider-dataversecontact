@@ -271,4 +271,16 @@ type PublishDefaultsResponse struct {
 // ScopesResponse is the response from GET /api/v2/_admin/scopes.
 type ScopesResponse struct {
 	Scopes []string `json:"scopes"`
+	// ScopeAuth says where each scope's admin token must come from.
+	ScopeAuth []ScopeAuth `json:"scopeAuth,omitempty"`
+}
+
+// ScopeAuth is one scope's admin sign-in, as GET /api/v2/_admin/scopes
+// publishes it.
+type ScopeAuth struct {
+	Name string `json:"name"`
+	// Authority is https://login.microsoftonline.com/<tenant>.
+	Authority string `json:"authority"`
+	// APIScope is the scope's Dataverse URL plus /.default.
+	APIScope string `json:"apiScope"`
 }

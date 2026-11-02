@@ -20,11 +20,14 @@ variable "api_url" {
   type = string
 }
 
-# Must match ADMIN_CONNECTION_KEY on the API deployment. Prefer setting it
-# via the DATAVERSE_CONTACT_CONNECTION_KEY environment variable.
+# The API's ADMIN_CONNECTION_KEY. Prefer setting it via the
+# DATAVERSE_CONTACT_CONNECTION_KEY environment variable. Leave it unset to sign
+# in with Microsoft Entra ID instead (your az login, or a pipeline identity;
+# provider 1.8.0 or later). See the "Signing in" guide.
 variable "connection_key" {
   type      = string
   sensitive = true
+  default   = null
 }
 
 variable "scope" {

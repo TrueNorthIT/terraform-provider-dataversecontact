@@ -14,16 +14,20 @@ terraform {
   required_providers {
     dataversecontact = {
       source  = "TrueNorthIT/dataversecontact"
-      version = "~> 1.0"
+      version = "~> 1.8"
     }
   }
 }
 
 provider "dataversecontact" {
   api_url = "https://api.dataverse-contact.tnapps.co.uk"
-  # connection_key read from DATAVERSE_CONTACT_CONNECTION_KEY
 }
 ```
+
+The provider signs in with your `az login`, or with the admin connection key
+when `DATAVERSE_CONTACT_CONNECTION_KEY` is set. Your account needs System
+Customizer in the scope's Dataverse. [Signing in](authentication) has the
+details, and how to run this from a pipeline.
 
 Pin a version. After `terraform init` downloads the provider, editors running
 the Terraform language server (e.g. VS Code with the HashiCorp Terraform
