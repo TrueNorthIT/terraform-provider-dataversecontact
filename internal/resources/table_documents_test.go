@@ -490,6 +490,12 @@ func TestDocumentExtensionProblem(t *testing.T) {
 	}
 }
 
+// withLibraries sets upload.libraries on an upload block.
+func withLibraries(u *DocumentsUploadModel, libraries ...string) *DocumentsUploadModel {
+	u.Libraries = filtersOf(libraries...)
+	return u
+}
+
 func TestValidateDocumentsUpload(t *testing.T) {
 	columns := columnsOf(map[string]string{"ShowOnPortal": "boolean", "Rank": "number", "DocType": "string", "Due": "datetime"})
 	noList := types.ListNull(types.StringType)
@@ -533,6 +539,18 @@ func TestValidateDocumentsUpload(t *testing.T) {
 		{name: "max_bytes above the cap", d: documentsWith(columns, uploadOf(types.Int64Value(26214401), noList, types.MapNull(types.StringType))),
 			warning: "above the API's default deployment cap of 26214400 bytes"},
 		{name: "unknown max_bytes", d: documentsWith(columns, uploadOf(types.Int64Unknown(), noList, types.MapNull(types.StringType)))},
+		// folder and library say where every upload goes: fields of every
+		// document, fixed like any column, not declared in documents.columns.
+		{name: "where every upload goes", d: documentsWith(columns, fixed(map[string]string{
+			"ShowOnPortal": "true", "folder": "Evidence/Photos", "library": "Proof"}))},
+		{name: "where, with no columns declared", d: documentsWith(types.MapNull(types.StringType), fixed(map[string]string{"folder": "Evidence"}))},
+		{name: "folder climbing out", d: documentsWith(columns, fixed(map[string]string{"folder": "../Elsewhere"})),
+			want: "is not a folder path below the row's folder"},
+		{name: "library as a path", d: documentsWith(columns, fixed(map[string]string{"library": "Evidence/Photos"})),
+			want: "isn't a library's URL name"},
+		{name: "libraries an invite may choose", d: documentsWith(columns, withLibraries(fixed(map[string]string{"ShowOnPortal": "true"}), "Evidence", "Archive"))},
+		{name: "libraries beside a fixed library", d: documentsWith(columns, withLibraries(fixed(map[string]string{"library": "Proof"}), "Archive")),
+			want: "columns fixes library"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -566,42 +584,67 @@ func TestDocumentExtensionValidatorDescription(t *testing.T) {
 	}
 }
 
-// upload.folder, .library and .libraries (Contact API 1.48.0) go out under the
-// API's names and come back unchanged. Unset, they're left out, and a
-// published hint's nulls read back as unset, so an existing config plans no
-// change.
+// folder and library (Contact API 1.48.0) are fixed upload values like any
+// column, sent as strings; libraries goes out under its own name. All come back
+// unchanged. Unset, libraries is left out, and a published hint's null or
+// empty list reads back as unset, so an existing config plans no change.
 func TestDocumentsUploadPlacementRoundTrip(t *testing.T) {
-	in := emptyUpload()
-	in.Folder = types.StringValue("Evidence/Photos")
-	in.Library = types.StringValue("Proof")
-	in.Libraries = filtersOf("Archive", "Shared Documents")
+	for name, c := range map[string]struct {
+		columns   map[string]string
+		libraries []string
+		want      string
+	}{
+		"fixed folder, libraries to choose from": {
+			columns:   map[string]string{"folder": "Evidence/Photos"},
+			libraries: []string{"Archive", "Shared Documents"},
+			want:      `{"columns":{"folder":"Evidence/Photos"},"libraries":["Archive","Shared Documents"]}`,
+		},
+		"fixed library": {
+			columns: map[string]string{"library": "Proof", "folder": "Blue Badge"},
+			want:    `{"columns":{"folder":"Blue Badge","library":"Proof"}}`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			in := emptyUpload()
+			in.Columns = columnsOf(c.columns)
+			if c.libraries != nil {
+				in.Libraries = filtersOf(c.libraries...)
+			}
+			model := &TableResourceModel{}
+			readHint(t, documentsHint(``), model)
+			model.Documents = documentsWith(types.MapNull(types.StringType), in)
+
+			got, _ := json.Marshal(writeHint(t, model)["documents"].(map[string]any)["upload"])
+			if string(got) != c.want {
+				t.Fatalf("sent %s\nwant %s", got, c.want)
+			}
+			back := &TableResourceModel{}
+			readHint(t, documentsHint(`, "documents": {"permission": "casedocuments", "upload": `+string(got)+`}`), back)
+			u := back.Documents.Upload
+			if u == nil || !u.Columns.Equal(in.Columns) {
+				t.Fatalf("columns changed in the round trip: %+v", u)
+			}
+			if c.libraries == nil && !u.Libraries.IsNull() || c.libraries != nil && !u.Libraries.Equal(in.Libraries) {
+				t.Fatalf("libraries changed in the round trip: %+v", u.Libraries)
+			}
+		})
+	}
+
 	model := &TableResourceModel{}
 	readHint(t, documentsHint(``), model)
-	model.Documents = documentsWith(types.MapNull(types.StringType), in)
-
-	got, _ := json.Marshal(writeHint(t, model)["documents"].(map[string]any)["upload"])
-	if want := `{"folder":"Evidence/Photos","libraries":["Archive","Shared Documents"],"library":"Proof"}`; string(got) != want {
-		t.Fatalf("sent %s\nwant %s", got, want)
-	}
-	back := &TableResourceModel{}
-	readHint(t, documentsHint(`, "documents": {"permission": "casedocuments", "upload": `+string(got)+`}`), back)
-	if u := back.Documents.Upload; u == nil || !u.Folder.Equal(in.Folder) || !u.Library.Equal(in.Library) || !u.Libraries.Equal(in.Libraries) {
-		t.Fatalf("changed in the round trip: %+v", u)
-	}
-
 	model.Documents = documentsWith(types.MapNull(types.StringType), emptyUpload())
 	if got, _ := json.Marshal(writeHint(t, model)["documents"].(map[string]any)["upload"]); string(got) != `{}` {
 		t.Fatalf("sent %s for an upload block without them, want {}", got)
 	}
 	for name, upload := range map[string]string{
 		"absent": `{}`,
-		"null":   `{"folder": null, "library": null, "libraries": null}`,
-		"empty":  `{"folder": "", "library": "", "libraries": []}`,
+		"null":   `{"libraries": null}`,
+		"empty":  `{"libraries": []}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			back := &TableResourceModel{}
 			readHint(t, documentsHint(`, "documents": {"permission": "casedocuments", "upload": `+upload+`}`), back)
-			if u := back.Documents.Upload; u == nil || !u.Folder.IsNull() || !u.Library.IsNull() || !u.Libraries.IsNull() {
+			if u := back.Documents.Upload; u == nil || !u.Libraries.IsNull() || !u.Columns.IsNull() {
 				t.Fatalf("should read back unset, got %+v", u)
 			}
 		})
