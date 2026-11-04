@@ -51,6 +51,7 @@ type DocumentsUploadModel struct {
 	Extensions types.List  `tfsdk:"extensions"`
 	Columns    types.Map   `tfsdk:"columns"`
 	Invites    types.Bool  `tfsdk:"invites"`
+	Libraries  types.List  `tfsdk:"libraries"`
 }
 
 // DocumentsJSON is the hint's `documents` key.
@@ -71,6 +72,7 @@ type DocumentsUploadJSON struct {
 	Extensions []string                   `json:"extensions,omitempty"`
 	Columns    map[string]json.RawMessage `json:"columns,omitempty"`
 	Invites    *bool                      `json:"invites,omitempty"`
+	Libraries  []string                   `json:"libraries,omitempty"`
 }
 
 // DocumentColumnsJSON is `documents.columns`. The provider always writes the
@@ -107,6 +109,7 @@ var documentBuiltInFields = map[string]string{
 	"id":         "string",
 	"name":       "string",
 	"folder":     "string",
+	"library":    "string",
 	"isFolder":   "boolean",
 	"mimeType":   "string",
 	"size":       "number",
@@ -154,6 +157,9 @@ func documentsBlock() schema.SingleNestedBlock {
 		builtIns = append(builtIns, name)
 	}
 	sort.Strings(builtIns)
+	// Names a column can't have: the built-in fields, folder and library among
+	// them (where a document is, and where an upload goes).
+	reserved := builtIns
 
 	return schema.SingleNestedBlock{
 		Description: "SharePoint documents in each row's folder. Dataverse's SharePoint integration keeps a " +
@@ -161,8 +167,9 @@ func documentsBlock() schema.SingleNestedBlock {
 			"level, read through Microsoft Graph). The row is checked with this table's own scoping first. " +
 			"Listing needs the documents permission at that tier, not this table's: grant it in " +
 			"dataversecontact_permissions_sync.default_permissions under the same name (e.g. " +
-			"casedocuments = [\"me\"]). Each document carries id, name, folder, isFolder, mimeType, size, " +
-			"createdon and modifiedon, plus the columns declared here. Switch document management on for the " +
+			"casedocuments = [\"me\"]). Each document carries id, name, folder, library (its library's URL name, " +
+			"Contact API 1.48.0 or later), isFolder, mimeType, size, createdon and modifiedon, plus the columns " +
+			"declared here. Switch document management on for the " +
 			"table in Dataverse, and grant the API's service principal Sites.Selected with Read on the site. " +
 			"Add an upload block to let callers upload files too. " +
 			"Needs Contact API 1.34.0 or later: an older API keeps the key without an error but serves no documents.",
@@ -195,7 +202,7 @@ func documentsBlock() schema.SingleNestedBlock {
 					mapvalidator.KeysAre(
 						stringvalidator.RegexMatches(documentColumnPattern,
 							"must be a SharePoint column internal name (letters, digits and underscores, e.g. \"ShowOnPortal\")"),
-						stringvalidator.NoneOf(builtIns...),
+						stringvalidator.NoneOf(reserved...),
 					),
 					mapvalidator.ValueStringsAre(stringvalidator.OneOf(documentColumnTypes...)),
 				},
@@ -258,7 +265,12 @@ func documentsUploadBlock() schema.SingleNestedBlock {
 					"an upload passes filters = [\"ShowOnPortal eq true\"]. Each column must be declared in " +
 					"documents.columns, with its value written as a string that suits the declared type: \"true\" or " +
 					"\"false\" for boolean, a number such as \"4\" for number; the provider sends each as its type. " +
-					"Callers can't set or override them, and if they can't be set the upload is undone.",
+					"Callers can't set or override them, and if they can't be set the upload is undone. Two more fields " +
+					"say where every upload goes, as fixed values like any other (Contact API 1.48.0 or later): folder, " +
+					"a folder below the row's folder (e.g. folder = \"Evidence/Photos\"; a caller or invite can't then " +
+					"choose one), and library, a library's URL name (e.g. library = \"Evidence\"): the row's folder in " +
+					"that library, made the way Dataverse makes one if the row has none. That library needs the other " +
+					"fixed columns too.",
 				Optional:    true,
 				ElementType: types.StringType,
 				Validators: []validator.Map{
@@ -274,8 +286,56 @@ func documentsUploadBlock() schema.SingleNestedBlock {
 					"so links point at the portal. Needs Contact API 1.37.0 or later.",
 				Optional: true,
 			},
+			"libraries": schema.ListAttribute{
+				Description: "The libraries an upload invite may send its file to, by URL name (e.g. [\"Evidence\", " +
+					"\"Archive\"]): the values its preset library may take, as a choice column's options are. Each needs " +
+					"the fixed columns, or uploads to it fail. Not with a library fixed in columns, which every upload " +
+					"goes to. " + documentPlacementVersion,
+				Optional:    true,
+				ElementType: types.StringType,
+				Validators: []validator.List{
+					listvalidator.SizeAtLeast(1),
+					listvalidator.UniqueValues(),
+					listvalidator.ValueStringsAre(documentLibraryValidator{}),
+				},
+			},
 		},
 	}
+}
+
+// documentPlacementVersion: upload.libraries, and folder and library as fixed
+// upload values, arrived together; an older API's build refuses them.
+const documentPlacementVersion = "Needs Contact API 1.48.0 or later: an older API refuses the key, and the table drops " +
+	"out of the scope."
+
+// documentLibraryValidator mirrors the API's libraryName: one name, as a
+// library's web address holds it.
+type documentLibraryValidator struct{}
+
+func (documentLibraryValidator) Description(context.Context) string {
+	return "must be a library's URL name"
+}
+
+func (v documentLibraryValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (documentLibraryValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	if problem := documentLibraryProblem(req.ConfigValue.ValueString()); problem != "" {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid upload library", problem)
+	}
+}
+
+func documentLibraryProblem(library string) string {
+	if library == "" || strings.TrimSpace(library) != library || len(library) > 128 ||
+		library == "." || library == ".." || !folderSegmentPattern.MatchString(library) {
+		return fmt.Sprintf("%q isn't a library's URL name: write the one name in its web address (e.g. \"Evidence\"), "+
+			"without / and without any of \" * : < > ? \\ | # %%.", library)
+	}
+	return ""
 }
 
 // documentExtensionValidator: an extension the API's allowlist can hold, and
@@ -409,7 +469,7 @@ func validateDocuments(d *DocumentsModel) diag.Diagnostics {
 		case !known:
 			diags.AddAttributeError(at, "Invalid documents filter",
 				fmt.Sprintf("%q isn't a document field: declare the column in documents.columns, or use one of "+
-					"id, name, folder, isFolder, mimeType, size, createdon, modifiedon.", field))
+					"id, name, folder, library, isFolder, mimeType, size, createdon, modifiedon.", field))
 		case typ != "" && !contains(documentFilterOperators[typ], operator):
 			diags.AddAttributeError(at, "Invalid documents filter",
 				fmt.Sprintf("'%s' doesn't apply to %s field %q; use %s.", operator, typ, field,
@@ -425,9 +485,11 @@ func validateDocuments(d *DocumentsModel) diag.Diagnostics {
 
 // validateDocumentsUpload checks the upload block against the rest of
 // documents: each fixed column is declared in documents.columns with a type
-// its value suits. A max_bytes above the default deployment cap is only a
-// warning, as the API's save makes it: a deployment can raise the cap, and
-// requests are capped anyway.
+// its value suits, or is folder or library (where every upload goes) with a
+// value the API takes; and libraries isn't listed beside a fixed library. A
+// max_bytes above the default deployment cap is only a warning, as the API's
+// save makes it: a deployment can raise the cap, and requests are capped
+// anyway.
 func validateDocumentsUpload(d *DocumentsModel) diag.Diagnostics {
 	var diags diag.Diagnostics
 	u := d.Upload
@@ -448,6 +510,11 @@ func validateDocumentsUpload(d *DocumentsModel) diag.Diagnostics {
 	if u.Columns.IsNull() || u.Columns.IsUnknown() || d.Columns.IsUnknown() {
 		return diags
 	}
+	if _, fixed := u.Columns.Elements()["library"]; fixed && !u.Libraries.IsNull() && !u.Libraries.IsUnknown() {
+		diags.AddAttributeError(at.AtName("libraries"), "libraries beside a fixed library",
+			"columns fixes library, so every upload goes to that library and no invite can choose one: "+
+				"leave libraries out, or take library out of columns.")
+	}
 	declared := d.Columns.Elements() // empty when documents.columns is null
 	names := make([]string, 0, len(u.Columns.Elements()))
 	for name := range u.Columns.Elements() {
@@ -456,6 +523,19 @@ func validateDocumentsUpload(d *DocumentsModel) diag.Diagnostics {
 	sort.Strings(names) // diagnostics in a stable order
 	for _, name := range names {
 		columnAt := at.AtName("columns").AtMapKey(name)
+		// Where every upload goes: fields of every document, not declared columns.
+		if name == "folder" || name == "library" {
+			if value := knownString(u.Columns.Elements()[name]); value != nil {
+				problem := documentFolderProblem(*value)
+				if name == "library" {
+					problem = documentLibraryProblem(*value)
+				}
+				if problem != "" {
+					diags.AddAttributeError(columnAt, "Invalid upload "+name, problem)
+				}
+			}
+			continue
+		}
 		t, ok := declared[name]
 		if !ok {
 			diags.AddAttributeError(columnAt, "Undeclared upload column",
@@ -590,6 +670,8 @@ func documentsUploadModelToJSON(ctx context.Context, u *DocumentsUploadModel, co
 		invites := u.Invites.ValueBool()
 		out.Invites = &invites
 	}
+	// Left out when unset, so an upload block without it publishes what it did before.
+	out.Libraries = tfListToStrings(ctx, u.Libraries, diags)
 	if !u.Columns.IsNull() && !u.Columns.IsUnknown() {
 		var values map[string]string
 		diags.Append(u.Columns.ElementsAs(ctx, &values, false)...)
@@ -653,11 +735,14 @@ func documentsUploadJSONToModel(u *DocumentsUploadJSON, prior *DocumentsUploadMo
 	if u.Invites != nil {
 		invites = types.BoolValue(*u.Invites)
 	}
+	// libraries: absent and null (how a published hint spells an unset key)
+	// both read back as unset.
 	return &DocumentsUploadModel{
 		MaxBytes:   maxBytes,
 		Extensions: stringsToTFListOrNull(u.Extensions),
 		Columns:    documentUploadColumnsToModel(u.Columns, prior),
 		Invites:    invites,
+		Libraries:  stringsToTFListOrNull(u.Libraries),
 	}
 }
 

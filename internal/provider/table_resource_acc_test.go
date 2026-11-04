@@ -1064,6 +1064,7 @@ func TestAccTable_documentsUpload(t *testing.T) {
 						"extensions": knownvalue.Null(),
 						"columns":    knownvalue.Null(),
 						"invites":    knownvalue.Null(),
+						"libraries":  knownvalue.Null(),
 					})),
 				},
 			},
