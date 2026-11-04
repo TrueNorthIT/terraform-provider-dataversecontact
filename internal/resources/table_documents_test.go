@@ -565,3 +565,65 @@ func TestDocumentExtensionValidatorDescription(t *testing.T) {
 		t.Fatal("extension validator needs a description")
 	}
 }
+
+// upload.folder, .library and .libraries (Contact API 1.48.0) go out under the
+// API's names and come back unchanged. Unset, they're left out, and a
+// published hint's nulls read back as unset, so an existing config plans no
+// change.
+func TestDocumentsUploadPlacementRoundTrip(t *testing.T) {
+	in := emptyUpload()
+	in.Folder = types.StringValue("Evidence/Photos")
+	in.Library = types.StringValue("Proof")
+	in.Libraries = filtersOf("Archive", "Shared Documents")
+	model := &TableResourceModel{}
+	readHint(t, documentsHint(``), model)
+	model.Documents = documentsWith(types.MapNull(types.StringType), in)
+
+	got, _ := json.Marshal(writeHint(t, model)["documents"].(map[string]any)["upload"])
+	if want := `{"folder":"Evidence/Photos","libraries":["Archive","Shared Documents"],"library":"Proof"}`; string(got) != want {
+		t.Fatalf("sent %s\nwant %s", got, want)
+	}
+	back := &TableResourceModel{}
+	readHint(t, documentsHint(`, "documents": {"permission": "casedocuments", "upload": `+string(got)+`}`), back)
+	if u := back.Documents.Upload; u == nil || !u.Folder.Equal(in.Folder) || !u.Library.Equal(in.Library) || !u.Libraries.Equal(in.Libraries) {
+		t.Fatalf("changed in the round trip: %+v", u)
+	}
+
+	model.Documents = documentsWith(types.MapNull(types.StringType), emptyUpload())
+	if got, _ := json.Marshal(writeHint(t, model)["documents"].(map[string]any)["upload"]); string(got) != `{}` {
+		t.Fatalf("sent %s for an upload block without them, want {}", got)
+	}
+	for name, upload := range map[string]string{
+		"absent": `{}`,
+		"null":   `{"folder": null, "library": null, "libraries": null}`,
+		"empty":  `{"folder": "", "library": "", "libraries": []}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			back := &TableResourceModel{}
+			readHint(t, documentsHint(`, "documents": {"permission": "casedocuments", "upload": `+upload+`}`), back)
+			if u := back.Documents.Upload; u == nil || !u.Folder.IsNull() || !u.Library.IsNull() || !u.Libraries.IsNull() {
+				t.Fatalf("should read back unset, got %+v", u)
+			}
+		})
+	}
+}
+
+// A library is named as its web address holds it: one name, which the API
+// takes as it is (its libraryName).
+func TestDocumentLibraryProblem(t *testing.T) {
+	for _, ok := range []string{"Evidence", "Shared Documents", "incident", "Proof_2026"} {
+		if problem := documentLibraryProblem(ok); problem != "" {
+			t.Errorf("%q refused: %s", ok, problem)
+		}
+	}
+	for _, bad := range []string{"", " Evidence", "Evidence ", "Evidence/Photos", ".", "..", "a?b", "a#b", `a\b`, strings.Repeat("x", 129)} {
+		if documentLibraryProblem(bad) == "" {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	ctx := context.Background()
+	v := documentLibraryValidator{}
+	if v.Description(ctx) == "" || v.MarkdownDescription(ctx) != v.Description(ctx) {
+		t.Fatal("library validator needs a description")
+	}
+}
