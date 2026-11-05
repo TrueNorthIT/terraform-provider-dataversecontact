@@ -60,6 +60,13 @@ resource "dataversecontact_permissions_sync" "default" {
   # with the email in):
   #
   #   contact_filters = ["cpa_portaluser eq true"]
+  #
+  # For scopes that send invites: the portal page an invite link opens, and the
+  # page an invite batch's link opens (several asks behind one link). They can
+  # be the same page, told apart by the fragment's key:
+  #
+  #   invite_url       = "https://portal.example.gov.uk/invite#token={token}"
+  #   invite_batch_url = "https://portal.example.gov.uk/invite#batch={token}"
 }
 
 output "permission_count" {

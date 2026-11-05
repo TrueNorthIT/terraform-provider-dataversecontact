@@ -38,6 +38,7 @@ type PermissionsSyncResourceModel struct {
 	ContactEmailColumn types.String       `tfsdk:"contact_email_column"`
 	ContactFilters     types.List         `tfsdk:"contact_filters"`
 	InviteURL          types.String       `tfsdk:"invite_url"`
+	InviteBatchURL     types.String       `tfsdk:"invite_batch_url"`
 	PermissionCount    types.Int64        `tfsdk:"permission_count"`
 }
 
@@ -221,6 +222,24 @@ func (r *PermissionsSyncResource) Schema(_ context.Context, _ resource.SchemaReq
 					),
 				},
 			},
+			"invite_batch_url": schema.StringAttribute{
+				Description: "The portal page an invite batch's link opens (one link that asks one person for " +
+					"several things, up to 10 steps, each done once), with {token} where the batch's token goes, " +
+					"e.g. \"https://portal.example.gov.uk/invite#batch={token}\". It can be the same page as " +
+					"invite_url, told apart by the fragment's key. Put the token in the fragment (after #), as for " +
+					"invite_url. Needed before anyone can send an invite batch in this scope: until it's set, the " +
+					"Dataverse batch actions refuse to make a batch, and the API's batch endpoints return the token " +
+					"without a link. Must be https. Published as `inviteBatchUrl` in the scope's defaults.json. " +
+					"Needs Contact API 1.49.0 or later.",
+				Optional: true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtMost(500),
+					stringvalidator.RegexMatches(
+						regexp.MustCompile(`^https://[^/?#\s]+.*\{token\}`),
+						"must be an https URL with {token} where the batch's token goes, e.g. \"https://portal.example.gov.uk/invite#batch={token}\"",
+					),
+				},
+			},
 			"contact_filters": schema.ListAttribute{
 				Description: "Extra OData conditions a contact must meet to count as the signed-in person, " +
 					"all of which must hold — written like a table's filters, e.g. [\"cpa_portaluser eq true\"]. " +
@@ -344,9 +363,10 @@ func (r *PermissionsSyncResource) publish(ctx context.Context, plan *Permissions
 		"contact_email_column": contactEmailColumn,
 		"contact_filters":      len(contactFilters),
 		"invite_url":           plan.InviteURL.ValueString() != "",
+		"invite_batch_url":     plan.InviteBatchURL.ValueString() != "",
 	})
 
-	if _, err := r.client.PublishDefaults(ctx, scope, permissions, allowSelfRegister, companyModel, join, contactEmailColumn, contactFilters, plan.InviteURL.ValueString()); err != nil {
+	if _, err := r.client.PublishDefaults(ctx, scope, permissions, allowSelfRegister, companyModel, join, contactEmailColumn, contactFilters, plan.InviteURL.ValueString(), plan.InviteBatchURL.ValueString()); err != nil {
 		resp.AddError("Failed to publish permissions", err.Error())
 		return
 	}

@@ -459,7 +459,9 @@ func TestAccPermissionsSync_removeSettings(t *testing.T) {
   contact_email_column = "emailaddress2"
   contact_filters      = ["cpa_portaluser eq true"]
   company_model        = { strategy = "parent-account" }
-  join                 = { strategy = "domain-list", domain_field = "new_portaldomains" }`),
+  join                 = { strategy = "domain-list", domain_field = "new_portaldomains" }
+  invite_url           = "https://portal.example.gov.uk/invite#token={token}"
+  invite_batch_url     = "https://portal.example.gov.uk/invite#batch={token}"`),
 			},
 			{
 				Config: permissionsSync(s, ``),
@@ -504,6 +506,47 @@ func TestAccPermissionsSync_inviteURL(t *testing.T) {
 				Check: expectDefaults(s, map[string]any{
 					"permissions":       map[string]any{},
 					"allowSelfRegister": false,
+				}),
+			},
+		},
+	})
+}
+
+// invite_batch_url is published as inviteBatchUrl beside inviteUrl, and goes
+// again when it's removed while inviteUrl stays.
+func TestAccPermissionsSync_inviteBatchURL(t *testing.T) {
+	s := fakeapi.New(t)
+	const inviteURL = "https://portal.example.gov.uk/invite#token={token}"
+	const batchURL = "https://portal.example.gov.uk/invite#batch={token}"
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		// The refusals first: the test's last config is the one it destroys with.
+		Steps: []resource.TestStep{
+			{
+				Config:      permissionsSync(s, `  invite_batch_url = "http://portal.example.gov.uk/invite#batch={token}"`),
+				ExpectError: regexp.MustCompile(`https URL`),
+			},
+			{
+				Config:      permissionsSync(s, `  invite_batch_url = "https://portal.example.gov.uk/invite"`),
+				ExpectError: regexp.MustCompile(`https URL`),
+			},
+			{
+				Config: permissionsSync(s, `
+  invite_url       = "`+inviteURL+`"
+  invite_batch_url = "`+batchURL+`"`),
+				Check: expectDefaults(s, map[string]any{
+					"permissions":       map[string]any{},
+					"allowSelfRegister": false,
+					"inviteUrl":         inviteURL,
+					"inviteBatchUrl":    batchURL,
+				}),
+			},
+			{
+				Config: permissionsSync(s, `  invite_url = "`+inviteURL+`"`),
+				Check: expectDefaults(s, map[string]any{
+					"permissions":       map[string]any{},
+					"allowSelfRegister": false,
+					"inviteUrl":         inviteURL,
 				}),
 			},
 		},
