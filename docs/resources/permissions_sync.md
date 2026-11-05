@@ -75,6 +75,13 @@ resource "dataversecontact_permissions_sync" "default" {
   # with the email in):
   #
   #   contact_filters = ["cpa_portaluser eq true"]
+  #
+  # For scopes that send invites: the portal page an invite link opens, and the
+  # page an invite batch's link opens (several asks behind one link). They can
+  # be the same page, told apart by the fragment's key:
+  #
+  #   invite_url       = "https://portal.example.gov.uk/invite#token={token}"
+  #   invite_batch_url = "https://portal.example.gov.uk/invite#batch={token}"
 }
 
 output "permission_count" {
@@ -96,6 +103,7 @@ output "permission_count" {
 - `contact_email_column` (String) The contact column holding the address people sign in with, as a logical name (e.g. "emailaddress2" or "cr123_portalemail"). A signed-in caller's verified email is matched against it, self-registration writes the address there, and no update through the API can change it. Omit to use the API's default: its CONTACT_EMAIL_COLUMN setting, else "emailaddress1". The column must exist on the contact table, and existing contacts need their address in it before you switch. Published as `contactEmailColumn` in the scope's defaults.json.
 - `contact_filters` (List of String) Extra OData conditions a contact must meet to count as the signed-in person, all of which must hold — written like a table's filters, e.g. ["cpa_portaluser eq true"]. A contact with the signed-in email that fails them is "not enabled": every call answers 403 with code "contact_not_enabled", and self-registration won't create a second contact to get round it. The API runs them against the scope's contacts before saving, so one Dataverse can't run fails the apply. Omit to let every active contact with the email sign in. Published as `contactFilters` in the scope's defaults.json.
 - `default_permissions` (Map of List of String) The baseline permissions granted to every authenticated contact, keyed by route name. Each value is the list of permission tokens for that route (e.g. ["team", "write", "create"]). Known tokens: the read tiers "me" (rows reachable from the caller's own contact via the table's contact join), "team" and "all" (every row), plus "write" (update within the granted read tier), "write:all" and "create". A table's documents.permission is a key here too: its read tiers list the documents (e.g. casedocuments = ["me"]), and "create" uploads them where the documents block has an upload block (casedocuments = ["me", "create"]). Published as the `permissions` object of the scope's defaults.json.
+- `invite_batch_url` (String) The portal page an invite batch's link opens (one link that asks one person for several things, up to 10 steps, each done once), with {token} where the batch's token goes, e.g. "https://portal.example.gov.uk/invite#batch={token}". It can be the same page as invite_url, told apart by the fragment's key. Put the token in the fragment (after #), as for invite_url. Needed before anyone can send an invite batch in this scope: until it's set, the Dataverse batch actions refuse to make a batch, and the API's batch endpoints return the token without a link. Must be https. Published as `inviteBatchUrl` in the scope's defaults.json. Needs Contact API 1.49.0 or later.
 - `invite_url` (String) The portal page an invite link opens, with {token} where the invite's token goes, e.g. "https://portal.example.gov.uk/invite#token={token}". Put the token in the fragment (after #), so it never reaches the portal's server logs, a Referer header or analytics. Needed before anyone can send an invite in this scope (tables opt in with invites and documents.upload.invites). Must be https. Published as `inviteUrl` in the scope's defaults.json. Needs Contact API 1.37.0 or later.
 - `join` (Attributes) How a signed-in caller with no Dataverse contact yet may self-join companies. Omit to just provision an unlinked contact for an officer to link. Published as `join` in the scope's defaults.json. (see [below for nested schema](#nestedatt--join))
 - `triggers` (Map of String) A map of trigger values. When any value changes, permissions are re-published. Use this to trigger a re-publish when table schemas change.

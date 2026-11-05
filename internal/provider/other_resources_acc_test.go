@@ -197,7 +197,9 @@ func TestAccPermissionsSync(t *testing.T) {
     strategy      = "domain-list"
     domain_field  = "new_portaldomains"
     require_match = true
-  }`),
+  }
+  invite_url       = "https://portal.example.gov.uk/invite#token={token}"
+  invite_batch_url = "https://portal.example.gov.uk/invite#batch={token}"`),
 				Check: expectDefaults(s, map[string]any{
 					"permissions":        map[string]any{"case": []any{"me"}},
 					"allowSelfRegister":  true,
@@ -207,7 +209,9 @@ func TestAccPermissionsSync(t *testing.T) {
 						"strategy":           "associated-accounts",
 						"associatedAccounts": map[string]any{"relationship": "new_contact_account"},
 					},
-					"join": map[string]any{"strategy": "domain-list", "domainField": "new_portaldomains", "requireMatch": true},
+					"join":           map[string]any{"strategy": "domain-list", "domainField": "new_portaldomains", "requireMatch": true},
+					"inviteUrl":      "https://portal.example.gov.uk/invite#token={token}",
+					"inviteBatchUrl": "https://portal.example.gov.uk/invite#batch={token}",
 				}),
 			},
 			{
@@ -226,6 +230,8 @@ func TestAccPermissionsSync(t *testing.T) {
     domain_field  = "new_portaldomains"
     require_match = true
   }
+  invite_url       = "https://portal.example.gov.uk/invite#token={token}"
+  invite_batch_url = "https://portal.example.gov.uk/invite#batch={token}"
   triggers = { tables = "v2" }`),
 				Check: func(*terraform.State) error {
 					if n := defaultsPuts(s); n <= puts+1 {

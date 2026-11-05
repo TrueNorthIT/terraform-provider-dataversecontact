@@ -231,6 +231,9 @@ type PublishDefaultsRequest struct {
 	// The portal page an invite link opens, with {token} where the token
 	// goes. Empty is omitted, and invites can't be sent.
 	InviteURL string `json:"inviteUrl,omitempty"`
+	// The portal page an invite batch's link opens, with {token} where the
+	// batch's token goes. Empty is omitted, and batches can't be made.
+	InviteBatchURL string `json:"inviteBatchUrl,omitempty"`
 }
 
 // JoinConfig mirrors the API's per-scope self-serve join config. Omitted (nil)
