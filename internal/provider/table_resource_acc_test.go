@@ -1060,11 +1060,12 @@ func TestAccTable_documentsUpload(t *testing.T) {
 				Check:            published(map[string]any{}),
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(caseAddress, uploadPath, knownvalue.ObjectExact(map[string]knownvalue.Check{
-						"max_bytes":  knownvalue.Null(),
-						"extensions": knownvalue.Null(),
-						"columns":    knownvalue.Null(),
-						"invites":    knownvalue.Null(),
-						"libraries":  knownvalue.Null(),
+						"max_bytes":      knownvalue.Null(),
+						"extensions":     knownvalue.Null(),
+						"columns":        knownvalue.Null(),
+						"invites":        knownvalue.Null(),
+						"libraries":      knownvalue.Null(),
+						"invite_library": knownvalue.Null(),
 					})),
 				},
 			},

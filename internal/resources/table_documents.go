@@ -47,11 +47,12 @@ type DocumentsModel struct {
 // uploads. Every attribute is optional, so `upload {}` is a real config: upload
 // with the API's defaults.
 type DocumentsUploadModel struct {
-	MaxBytes   types.Int64 `tfsdk:"max_bytes"`
-	Extensions types.List  `tfsdk:"extensions"`
-	Columns    types.Map   `tfsdk:"columns"`
-	Invites    types.Bool  `tfsdk:"invites"`
-	Libraries  types.List  `tfsdk:"libraries"`
+	MaxBytes      types.Int64  `tfsdk:"max_bytes"`
+	Extensions    types.List   `tfsdk:"extensions"`
+	Columns       types.Map    `tfsdk:"columns"`
+	Invites       types.Bool   `tfsdk:"invites"`
+	Libraries     types.List   `tfsdk:"libraries"`
+	InviteLibrary types.String `tfsdk:"invite_library"`
 }
 
 // DocumentsJSON is the hint's `documents` key.
@@ -68,11 +69,12 @@ type DocumentsJSON struct {
 // sent or read: the provider writes it typed by the column's declared type,
 // and the API also accepts (and keeps) strings.
 type DocumentsUploadJSON struct {
-	MaxBytes   *int64                     `json:"maxBytes,omitempty"`
-	Extensions []string                   `json:"extensions,omitempty"`
-	Columns    map[string]json.RawMessage `json:"columns,omitempty"`
-	Invites    *bool                      `json:"invites,omitempty"`
-	Libraries  []string                   `json:"libraries,omitempty"`
+	MaxBytes      *int64                     `json:"maxBytes,omitempty"`
+	Extensions    []string                   `json:"extensions,omitempty"`
+	Columns       map[string]json.RawMessage `json:"columns,omitempty"`
+	Invites       *bool                      `json:"invites,omitempty"`
+	Libraries     []string                   `json:"libraries,omitempty"`
+	InviteLibrary *string                    `json:"inviteLibrary,omitempty"`
 }
 
 // DocumentColumnsJSON is `documents.columns`. The provider always writes the
@@ -299,6 +301,16 @@ func documentsUploadBlock() schema.SingleNestedBlock {
 					listvalidator.ValueStringsAre(documentLibraryValidator{}),
 				},
 			},
+			"invite_library": schema.StringAttribute{
+				Description: "\"row\": an upload invite's preset library may be any library the row already has a " +
+					"folder in, instead of one listed in libraries. No folder is made for it. Not with libraries, or " +
+					"with a library fixed in columns. Needs Contact API 1.50.0 or later: an older API refuses the key, " +
+					"and the table drops out of the scope.",
+				Optional: true,
+				Validators: []validator.String{
+					stringvalidator.OneOf("row"),
+				},
+			},
 		},
 	}
 }
@@ -486,7 +498,8 @@ func validateDocuments(d *DocumentsModel) diag.Diagnostics {
 // validateDocumentsUpload checks the upload block against the rest of
 // documents: each fixed column is declared in documents.columns with a type
 // its value suits, or is folder or library (where every upload goes) with a
-// value the API takes; and libraries isn't listed beside a fixed library. A
+// value the API takes; and libraries isn't listed beside a fixed library, nor
+// invite_library beside either. A
 // max_bytes above the default deployment cap is only a warning, as the API's
 // save makes it: a deployment can raise the cap, and requests are capped
 // anyway.
@@ -504,6 +517,20 @@ func validateDocumentsUpload(d *DocumentsModel) diag.Diagnostics {
 				"capped by the deployment's DOCUMENT_UPLOAD_MAX_BYTES anyway, so this only applies where the "+
 				"deployment raised it.",
 				u.MaxBytes.ValueInt64(), documentUploadCap))
+	}
+
+	inviteLibrary := !u.InviteLibrary.IsNull() && !u.InviteLibrary.IsUnknown()
+	if inviteLibrary && !u.Libraries.IsNull() && !u.Libraries.IsUnknown() {
+		diags.AddAttributeError(at.AtName("invite_library"), "invite_library beside libraries",
+			"invite_library = \"row\" lets an invite choose any library the row already has a folder in, so "+
+				"libraries can't list them too: leave libraries out, or take invite_library out.")
+	}
+	if inviteLibrary && !u.Columns.IsUnknown() {
+		if _, fixed := u.Columns.Elements()["library"]; fixed {
+			diags.AddAttributeError(at.AtName("invite_library"), "invite_library beside a fixed library",
+				"columns fixes library, so every upload goes to that library and no invite can choose one: "+
+					"leave invite_library out, or take library out of columns.")
+		}
 	}
 
 	// Until the columns are known, nothing can be checked against them.
@@ -672,6 +699,10 @@ func documentsUploadModelToJSON(ctx context.Context, u *DocumentsUploadModel, co
 	}
 	// Left out when unset, so an upload block without it publishes what it did before.
 	out.Libraries = tfListToStrings(ctx, u.Libraries, diags)
+	if !u.InviteLibrary.IsNull() && !u.InviteLibrary.IsUnknown() {
+		inviteLibrary := u.InviteLibrary.ValueString()
+		out.InviteLibrary = &inviteLibrary
+	}
 	if !u.Columns.IsNull() && !u.Columns.IsUnknown() {
 		var values map[string]string
 		diags.Append(u.Columns.ElementsAs(ctx, &values, false)...)
@@ -735,14 +766,19 @@ func documentsUploadJSONToModel(u *DocumentsUploadJSON, prior *DocumentsUploadMo
 	if u.Invites != nil {
 		invites = types.BoolValue(*u.Invites)
 	}
-	// libraries: absent and null (how a published hint spells an unset key)
-	// both read back as unset.
+	// libraries and inviteLibrary: absent and null (how a published hint
+	// spells an unset key) both read back as unset.
+	inviteLibrary := types.StringNull()
+	if u.InviteLibrary != nil {
+		inviteLibrary = types.StringValue(*u.InviteLibrary)
+	}
 	return &DocumentsUploadModel{
-		MaxBytes:   maxBytes,
-		Extensions: stringsToTFListOrNull(u.Extensions),
-		Columns:    documentUploadColumnsToModel(u.Columns, prior),
-		Invites:    invites,
-		Libraries:  stringsToTFListOrNull(u.Libraries),
+		MaxBytes:      maxBytes,
+		Extensions:    stringsToTFListOrNull(u.Extensions),
+		Columns:       documentUploadColumnsToModel(u.Columns, prior),
+		Invites:       invites,
+		Libraries:     stringsToTFListOrNull(u.Libraries),
+		InviteLibrary: inviteLibrary,
 	}
 }
 
