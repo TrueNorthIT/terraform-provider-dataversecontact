@@ -496,6 +496,12 @@ func withLibraries(u *DocumentsUploadModel, libraries ...string) *DocumentsUploa
 	return u
 }
 
+// withInviteLibrary sets upload.invite_library = "row" on an upload block.
+func withInviteLibrary(u *DocumentsUploadModel) *DocumentsUploadModel {
+	u.InviteLibrary = types.StringValue("row")
+	return u
+}
+
 func TestValidateDocumentsUpload(t *testing.T) {
 	columns := columnsOf(map[string]string{"ShowOnPortal": "boolean", "Rank": "number", "DocType": "string", "Due": "datetime"})
 	noList := types.ListNull(types.StringType)
@@ -551,6 +557,14 @@ func TestValidateDocumentsUpload(t *testing.T) {
 		{name: "libraries an invite may choose", d: documentsWith(columns, withLibraries(fixed(map[string]string{"ShowOnPortal": "true"}), "Evidence", "Archive"))},
 		{name: "libraries beside a fixed library", d: documentsWith(columns, withLibraries(fixed(map[string]string{"library": "Proof"}), "Archive")),
 			want: "columns fixes library"},
+		// invite_library (Contact API 1.50.0): any library the row has a folder
+		// in, so neither a list of them nor a fixed one beside it.
+		{name: "invite_library alone", d: documentsWith(columns, withInviteLibrary(emptyUpload()))},
+		{name: "invite_library with fixed columns", d: documentsWith(columns, withInviteLibrary(fixed(map[string]string{"ShowOnPortal": "true", "folder": "Evidence"})))},
+		{name: "invite_library beside libraries", d: documentsWith(columns, withInviteLibrary(withLibraries(emptyUpload(), "Evidence"))),
+			want: "libraries can't list them too"},
+		{name: "invite_library beside a fixed library", d: documentsWith(columns, withInviteLibrary(fixed(map[string]string{"library": "Proof"}))),
+			want: "leave invite_library out"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -668,5 +682,47 @@ func TestDocumentLibraryProblem(t *testing.T) {
 	v := documentLibraryValidator{}
 	if v.Description(ctx) == "" || v.MarkdownDescription(ctx) != v.Description(ctx) {
 		t.Fatal("library validator needs a description")
+	}
+}
+
+// invite_library (Contact API 1.50.0) goes out as inviteLibrary only when set,
+// so an upload block without it publishes byte for byte what it did before,
+// and absent or null reads back as unset: an existing config plans no change.
+func TestDocumentsUploadInviteLibrary(t *testing.T) {
+	send := func(u *DocumentsUploadModel) string {
+		model := &TableResourceModel{}
+		readHint(t, documentsHint(``), model)
+		model.Documents = documentsWith(types.MapNull(types.StringType), u)
+		got, _ := json.Marshal(writeHint(t, model)["documents"].(map[string]any)["upload"])
+		return string(got)
+	}
+	without := emptyUpload()
+	without.Columns = columnsOf(map[string]string{"folder": "Evidence"})
+	without.Invites = types.BoolValue(true)
+	if got, want := send(without), `{"columns":{"folder":"Evidence"},"invites":true}`; got != want {
+		t.Fatalf("sent %s without invite_library, want %s", got, want)
+	}
+
+	got := send(withInviteLibrary(emptyUpload()))
+	if got != `{"inviteLibrary":"row"}` {
+		t.Fatalf(`sent %s, want {"inviteLibrary":"row"}`, got)
+	}
+	back := &TableResourceModel{}
+	readHint(t, documentsHint(`, "documents": {"permission": "casedocuments", "upload": `+got+`}`), back)
+	if u := back.Documents.Upload; u == nil || !u.InviteLibrary.Equal(types.StringValue("row")) {
+		t.Fatalf("invite_library changed in the round trip: %+v", u)
+	}
+
+	for name, upload := range map[string]string{
+		"absent": `{}`,
+		"null":   `{"inviteLibrary": null}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			back := &TableResourceModel{}
+			readHint(t, documentsHint(`, "documents": {"permission": "casedocuments", "upload": `+upload+`}`), back)
+			if u := back.Documents.Upload; u == nil || !u.InviteLibrary.IsNull() {
+				t.Fatalf("should read back unset, got %+v", u)
+			}
+		})
 	}
 }

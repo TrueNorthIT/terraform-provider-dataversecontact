@@ -108,6 +108,7 @@ resource "dataversecontact_table" "case" {
       # Where every upload goes is fixed the same way (Contact API 1.48.0):
       # columns = { ShowOnPortal = "true", library = "Evidence", folder = "Photos" }
       # libraries = ["Evidence", "Archive"] # or: the libraries an upload invite may choose
+      # invite_library = "row"              # or (Contact API 1.50.0): any library the row has a folder in
     }
   }
 }
