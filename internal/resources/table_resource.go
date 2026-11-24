@@ -666,7 +666,7 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Description: "Field definitions keyed by Dataverse logical name.",
 				Required:    true,
 				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
+					Attributes: withWriteRuleAttributes(map[string]schema.Attribute{
 						"type": schema.StringAttribute{
 							Description: "Field data type: \"string\", \"number\", \"datetime\", " +
 								"\"boolean\", \"lookup\" or \"choice\".",
@@ -701,7 +701,7 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 								bindFieldFromState{},
 							},
 						},
-					},
+					}),
 				},
 			},
 		},
@@ -888,6 +888,7 @@ func (r *TableResource) ValidateConfig(ctx context.Context, req resource.Validat
 				continue
 			}
 			attrs := obj.Attributes()
+			resp.Diagnostics.Append(validateFieldWriteRules(name, attrs)...)
 			fieldType, _ := attrs["type"].(types.String)
 			lookupTable, _ := attrs["lookup_table"].(types.String)
 			readOnly, _ := attrs["read_only"].(types.Bool)

@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -1066,6 +1067,7 @@ func TestAccTable_documentsUpload(t *testing.T) {
 						"invites":        knownvalue.Null(),
 						"libraries":      knownvalue.Null(),
 						"invite_library": knownvalue.Null(),
+						"allowed":        knownvalue.Null(),
 					})),
 				},
 			},
@@ -1137,6 +1139,66 @@ func TestAccTable_documentsUpload(t *testing.T) {
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(caseAddress, uploadPath, knownvalue.Null()),
 				},
+			},
+		},
+	})
+}
+
+// Write rules (Contact API 1.58.0, #589): field rules go out typed by the
+// field's type, upload.allowed as written, and both read back with no diff.
+func TestAccTable_writeRules(t *testing.T) {
+	s := fakeapi.New(t)
+	fields := baseFields + `
+    caseorigincode = { type = "choice", description = "Origin", fixed = "3" }
+    casetypecode   = { type = "choice", description = "Type", allowed = ["1", "2"], default = "1" }
+    estimate       = { type = "number", description = "Estimate", min = 0, max = 1000.5 }
+    subject        = { type = "string", description = "Subject", required = true, min_length = 3, max_length = 200, allowed = ["Comp*", "Enquiry"] }`
+	documents := `
+  documents {
+    permission = "casedocuments"
+    columns    = { ShowOnPortal = "boolean" }
+    filters    = ["library contains -Shared-"]
+    upload {
+      columns = { ShowOnPortal = "true" }
+      allowed = { library = ["*-Shared-*"], folder = ["", "Photos*"] }
+    }
+  }`
+	published := func(*terraform.State) error {
+		table := s.Table("default", "case")
+		got, _ := json.Marshal(map[string]any{
+			"fields":  table["fields"],
+			"allowed": table["documents"].(map[string]any)["upload"].(map[string]any)["allowed"],
+		})
+		want := `{"allowed":{"folder":["","Photos*"],"library":["*-Shared-*"]},"fields":{` +
+			`"caseorigincode":{"description":"Origin","fixed":3,"type":"choice"},` +
+			`"casetypecode":{"allowed":[1,2],"default":1,"description":"Type","type":"choice"},` +
+			`"estimate":{"description":"Estimate","max":1000.5,"min":0,"type":"number"},` +
+			`"incidentid":{"description":"Case id","readOnly":true,"type":"string"},` +
+			`"subject":{"allowed":["Comp*","Enquiry"],"description":"Subject","maxLength":200,"minLength":3,"required":true,"type":"string"},` +
+			`"title":{"description":"Title","type":"string"}}}`
+		if string(got) != want {
+			return fmt.Errorf("published %s\nwant %s", got, want)
+		}
+		return nil
+	}
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             tablesGone(s),
+		Steps: []resource.TestStep{
+			{
+				// Refused at plan time, before anything is published.
+				Config: caseTable(s, baseFields+`
+    caseorigincode = { type = "choice", description = "Origin", fixed = "3", allowed = ["3"] }`),
+				ExpectError: regexp.MustCompile(`fixed is the only value it can take`),
+			},
+			{
+				Config: caseTable(s, fields, documents),
+				Check:  published,
+			},
+			{
+				Config:           caseTable(s, fields, documents),
+				ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()}},
 			},
 		},
 	})

@@ -47,12 +47,21 @@ type DocumentsModel struct {
 // uploads. Every attribute is optional, so `upload {}` is a real config: upload
 // with the API's defaults.
 type DocumentsUploadModel struct {
-	MaxBytes      types.Int64  `tfsdk:"max_bytes"`
-	Extensions    types.List   `tfsdk:"extensions"`
-	Columns       types.Map    `tfsdk:"columns"`
-	Invites       types.Bool   `tfsdk:"invites"`
-	Libraries     types.List   `tfsdk:"libraries"`
-	InviteLibrary types.String `tfsdk:"invite_library"`
+	MaxBytes      types.Int64                  `tfsdk:"max_bytes"`
+	Extensions    types.List                   `tfsdk:"extensions"`
+	Columns       types.Map                    `tfsdk:"columns"`
+	Invites       types.Bool                   `tfsdk:"invites"`
+	Libraries     types.List                   `tfsdk:"libraries"`
+	InviteLibrary types.String                 `tfsdk:"invite_library"`
+	Allowed       *DocumentsUploadAllowedModel `tfsdk:"allowed"`
+}
+
+// DocumentsUploadAllowedModel is `upload.allowed` (Contact API 1.58.0, #589):
+// the libraries and folders an upload may go to, as names or * patterns. A
+// nested attribute, so nil when unset.
+type DocumentsUploadAllowedModel struct {
+	Library types.List `tfsdk:"library"`
+	Folder  types.List `tfsdk:"folder"`
 }
 
 // DocumentsJSON is the hint's `documents` key.
@@ -69,12 +78,19 @@ type DocumentsJSON struct {
 // sent or read: the provider writes it typed by the column's declared type,
 // and the API also accepts (and keeps) strings.
 type DocumentsUploadJSON struct {
-	MaxBytes      *int64                     `json:"maxBytes,omitempty"`
-	Extensions    []string                   `json:"extensions,omitempty"`
-	Columns       map[string]json.RawMessage `json:"columns,omitempty"`
-	Invites       *bool                      `json:"invites,omitempty"`
-	Libraries     []string                   `json:"libraries,omitempty"`
-	InviteLibrary *string                    `json:"inviteLibrary,omitempty"`
+	MaxBytes      *int64                      `json:"maxBytes,omitempty"`
+	Extensions    []string                    `json:"extensions,omitempty"`
+	Columns       map[string]json.RawMessage  `json:"columns,omitempty"`
+	Invites       *bool                       `json:"invites,omitempty"`
+	Libraries     []string                    `json:"libraries,omitempty"`
+	InviteLibrary *string                     `json:"inviteLibrary,omitempty"`
+	Allowed       *DocumentsUploadAllowedJSON `json:"allowed,omitempty"`
+}
+
+// DocumentsUploadAllowedJSON is `documents.upload.allowed`.
+type DocumentsUploadAllowedJSON struct {
+	Library []string `json:"library,omitempty"`
+	Folder  []string `json:"folder,omitempty"`
 }
 
 // DocumentColumnsJSON is `documents.columns`. The provider always writes the
@@ -299,6 +315,39 @@ func documentsUploadBlock() schema.SingleNestedBlock {
 					listvalidator.SizeAtLeast(1),
 					listvalidator.UniqueValues(),
 					listvalidator.ValueStringsAre(documentLibraryValidator{}),
+				},
+			},
+			"allowed": schema.SingleNestedAttribute{
+				Description: "Where an upload may go, as names or patterns where * is any characters (case ignored). " +
+					"library: the libraries, of those the row already has a folder in, an upload may use. An upload " +
+					"that names no library (a signed-in one) goes to the row's one folder in a matching library, not its " +
+					"first: none is a 409 upload_library_not_found, several a 409 upload_library_ambiguous, both before " +
+					"any bytes are sent. A folder is made only when library is one exact name. An upload invite's preset " +
+					"library must match and the row must have a folder there. Not with libraries, or a library fixed in " +
+					"columns. folder: the folders (below the row's) a caller or invite may put a file in; \"\" is the top. " +
+					"Not with a folder fixed in columns. " + writeRulesVersion,
+				Optional: true,
+				Attributes: map[string]schema.Attribute{
+					"library": schema.ListAttribute{
+						Description: "Library URL names or patterns, e.g. [\"*-Shared-*\"].",
+						Optional:    true,
+						ElementType: types.StringType,
+						Validators: []validator.List{
+							listvalidator.SizeAtLeast(1),
+							listvalidator.UniqueValues(),
+							listvalidator.ValueStringsAre(allowedLibraryValidator{}),
+						},
+					},
+					"folder": schema.ListAttribute{
+						Description: "Folder paths or patterns below the row's folder, e.g. [\"\", \"Photos*\"] (\"\" is the top).",
+						Optional:    true,
+						ElementType: types.StringType,
+						Validators: []validator.List{
+							listvalidator.SizeAtLeast(1),
+							listvalidator.UniqueValues(),
+							listvalidator.ValueStringsAre(allowedFolderValidator{}),
+						},
+					},
 				},
 			},
 			"invite_library": schema.StringAttribute{
@@ -533,6 +582,25 @@ func validateDocumentsUpload(d *DocumentsModel) diag.Diagnostics {
 		}
 	}
 
+	if a := u.Allowed; a != nil {
+		library := !a.Library.IsNull() && !a.Library.IsUnknown()
+		folder := !a.Folder.IsNull() && !a.Folder.IsUnknown()
+		if library && !u.Libraries.IsNull() && !u.Libraries.IsUnknown() {
+			diags.AddAttributeError(at.AtName("allowed").AtName("library"), "allowed.library beside libraries",
+				"libraries lists the libraries too: use allowed.library alone.")
+		}
+		if !u.Columns.IsNull() && !u.Columns.IsUnknown() {
+			if _, fixed := u.Columns.Elements()["library"]; fixed && library {
+				diags.AddAttributeError(at.AtName("allowed").AtName("library"), "allowed.library beside a fixed library",
+					"columns fixes library, so every upload goes to that library: leave one of them out.")
+			}
+			if _, fixed := u.Columns.Elements()["folder"]; fixed && folder {
+				diags.AddAttributeError(at.AtName("allowed").AtName("folder"), "allowed.folder beside a fixed folder",
+					"columns fixes folder, so every upload goes to that folder: leave one of them out.")
+			}
+		}
+	}
+
 	// Until the columns are known, nothing can be checked against them.
 	if u.Columns.IsNull() || u.Columns.IsUnknown() || d.Columns.IsUnknown() {
 		return diags
@@ -703,6 +771,13 @@ func documentsUploadModelToJSON(ctx context.Context, u *DocumentsUploadModel, co
 		inviteLibrary := u.InviteLibrary.ValueString()
 		out.InviteLibrary = &inviteLibrary
 	}
+	// Left out when unset; allowed = {} is sent as {}, as written.
+	if u.Allowed != nil {
+		out.Allowed = &DocumentsUploadAllowedJSON{
+			Library: tfListToStrings(ctx, u.Allowed.Library, diags),
+			Folder:  tfListToStrings(ctx, u.Allowed.Folder, diags),
+		}
+	}
 	if !u.Columns.IsNull() && !u.Columns.IsUnknown() {
 		var values map[string]string
 		diags.Append(u.Columns.ElementsAs(ctx, &values, false)...)
@@ -779,6 +854,70 @@ func documentsUploadJSONToModel(u *DocumentsUploadJSON, prior *DocumentsUploadMo
 		Invites:       invites,
 		Libraries:     stringsToTFListOrNull(u.Libraries),
 		InviteLibrary: inviteLibrary,
+		Allowed:       documentsUploadAllowedToModel(u.Allowed),
+	}
+}
+
+// documentsUploadAllowedToModel: absent and null read back as unset, {} as an
+// object with both lists null, matching allowed = {} in the config.
+func documentsUploadAllowedToModel(a *DocumentsUploadAllowedJSON) *DocumentsUploadAllowedModel {
+	if a == nil {
+		return nil
+	}
+	return &DocumentsUploadAllowedModel{
+		Library: stringsToTFListOrNull(a.Library),
+		Folder:  stringsToTFListOrNull(a.Folder),
+	}
+}
+
+// allowedLibraryValidator: a library's URL name where * may stand for any characters.
+type allowedLibraryValidator struct{}
+
+func (allowedLibraryValidator) Description(context.Context) string {
+	return "must be a library's URL name, where * may stand for any characters"
+}
+
+func (v allowedLibraryValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (allowedLibraryValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	if problem := documentLibraryProblem(strings.ReplaceAll(req.ConfigValue.ValueString(), "*", "x")); problem != "" {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid allowed library", problem)
+	}
+}
+
+// allowedFolderValidator: "" (the top) or a folder path below the row's folder
+// where * may stand for any characters, written without outer slashes or
+// spaces, as the API keeps it (so it reads back the same).
+type allowedFolderValidator struct{}
+
+func (allowedFolderValidator) Description(context.Context) string {
+	return "must be \"\" or a folder path below the row's folder, where * may stand for any characters"
+}
+
+func (v allowedFolderValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (allowedFolderValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	value := req.ConfigValue.ValueString()
+	if value == "" {
+		return
+	}
+	if strings.TrimSpace(value) != value || strings.Trim(value, "/") != value {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid allowed folder",
+			fmt.Sprintf("%q: write it without spaces or slashes at either end (e.g. \"Photos/2026\").", value))
+		return
+	}
+	if problem := documentFolderProblem(strings.ReplaceAll(value, "*", "x")); problem != "" {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid allowed folder", problem)
 	}
 }
 

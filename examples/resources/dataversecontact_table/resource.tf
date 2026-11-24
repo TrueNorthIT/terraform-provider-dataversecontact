@@ -22,6 +22,8 @@ resource "dataversecontact_table" "case" {
     title = {
       type        = "string"
       description = "Case title."
+      required    = true # write rule: a create must carry it, an update can't clear it
+      max_length  = 200
     }
     ticketnumber = {
       type        = "string"
@@ -40,6 +42,20 @@ resource "dataversecontact_table" "case" {
     new_estimatedcost = {
       type        = "number"
       description = "Estimated cost."
+    }
+    # Write rules (Contact API 1.58.0): what a caller may write, enforced by
+    # the API on every surface. A write that breaks one is a 400
+    # validation_failed naming each field and rule.
+    caseorigincode = {
+      type        = "choice"
+      description = "Where the case came from."
+      fixed       = "3" # Web: written on every create, callers can't change it
+    }
+    casetypecode = {
+      type        = "choice"
+      description = "Question or problem."
+      allowed     = ["1", "2"] # Request is for officers
+      default     = "1"
     }
     statuscode = {
       type        = "choice"
@@ -109,6 +125,8 @@ resource "dataversecontact_table" "case" {
       # columns = { ShowOnPortal = "true", library = "Evidence", folder = "Photos" }
       # libraries = ["Evidence", "Archive"] # or: the libraries an upload invite may choose
       # invite_library = "row"              # or (Contact API 1.50.0): any library the row has a folder in
+      # Where uploads go, out of the libraries the row has a folder in (Contact API 1.58.0):
+      # allowed = { library = ["*-Shared-*"] } # a signed-in upload goes to the row's shared folder, not its first
     }
   }
 }
