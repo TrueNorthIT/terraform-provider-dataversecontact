@@ -122,6 +122,17 @@ type FieldHintJSON struct {
 	LookupTable string `json:"lookupTable,omitempty"`
 	ValueField  string `json:"valueField,omitempty"`
 	BindField   string `json:"bindField,omitempty"`
+
+	// Write rules (Contact API 1.58.0); see table_write_rules.go. Values go
+	// typed by the field's type, so they're kept as raw JSON.
+	Fixed     json.RawMessage   `json:"fixed,omitempty"`
+	Default   json.RawMessage   `json:"default,omitempty"`
+	Allowed   []json.RawMessage `json:"allowed,omitempty"`
+	Required  bool              `json:"required,omitempty"`
+	MinLength *int64            `json:"minLength,omitempty"`
+	MaxLength *int64            `json:"maxLength,omitempty"`
+	Min       *float64          `json:"min,omitempty"`
+	Max       *float64          `json:"max,omitempty"`
 }
 
 // ── HCL → JSON (for Create / Update) ───────────────────────────────────
@@ -428,6 +439,7 @@ func fieldsModelToJSON(ctx context.Context, fields types.Map, diags *diag.Diagno
 		if v, ok := attrs["bind_field"].(types.String); ok && !v.IsNull() && !v.IsUnknown() {
 			f.BindField = v.ValueString()
 		}
+		fieldRulesModelToJSON(ctx, attrs, &f, diags)
 		result[key] = f
 	}
 	return result
@@ -444,17 +456,20 @@ func fieldsJSONToModel(ctx context.Context, fields map[string]FieldHintJSON, pri
 	priorFields := prior.Elements()
 
 	for key, f := range fields {
-		var priorReadOnly attr.Value
-		if obj, ok := priorFields[key].(types.Object); ok {
-			priorReadOnly = obj.Attributes()["read_only"]
+		var priorAttrs map[string]attr.Value
+		if obj, ok := priorFields[key].(types.Object); ok && !obj.IsNull() && !obj.IsUnknown() {
+			priorAttrs = obj.Attributes()
 		}
 		attrs := map[string]attr.Value{
 			"type":         types.StringValue(f.Type),
 			"description":  types.StringValue(f.Description),
-			"read_only":    keepFalse(f.ReadOnly, priorReadOnly),
+			"read_only":    keepFalse(f.ReadOnly, priorAttrs["read_only"]),
 			"lookup_table": stringOrNullAttr(f.LookupTable),
 			"value_field":  stringOrNullAttr(f.ValueField),
 			"bind_field":   stringOrNullAttr(f.BindField),
+		}
+		for name, value := range fieldRulesToModel(f, priorAttrs) {
+			attrs[name] = value
 		}
 		obj, d := types.ObjectValue(fieldAttrTypes(), attrs)
 		diags.Append(d...)
@@ -794,7 +809,7 @@ func singularize(word string) string {
 // ── Attribute type helpers (for constructing types.Object / types.Map) ──
 
 func fieldAttrTypes() map[string]attr.Type {
-	return map[string]attr.Type{
+	attrTypes := map[string]attr.Type{
 		"type":         types.StringType,
 		"description":  types.StringType,
 		"read_only":    types.BoolType,
@@ -802,6 +817,10 @@ func fieldAttrTypes() map[string]attr.Type {
 		"value_field":  types.StringType,
 		"bind_field":   types.StringType,
 	}
+	for name, t := range fieldWriteRuleAttrTypes() {
+		attrTypes[name] = t
+	}
+	return attrTypes
 }
 
 func fieldObjectType() attr.Type {

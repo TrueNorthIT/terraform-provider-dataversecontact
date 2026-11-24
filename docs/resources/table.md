@@ -37,6 +37,8 @@ resource "dataversecontact_table" "case" {
     title = {
       type        = "string"
       description = "Case title."
+      required    = true # write rule: a create must carry it, an update can't clear it
+      max_length  = 200
     }
     ticketnumber = {
       type        = "string"
@@ -55,6 +57,20 @@ resource "dataversecontact_table" "case" {
     new_estimatedcost = {
       type        = "number"
       description = "Estimated cost."
+    }
+    # Write rules (Contact API 1.58.0): what a caller may write, enforced by
+    # the API on every surface. A write that breaks one is a 400
+    # validation_failed naming each field and rule.
+    caseorigincode = {
+      type        = "choice"
+      description = "Where the case came from."
+      fixed       = "3" # Web: written on every create, callers can't change it
+    }
+    casetypecode = {
+      type        = "choice"
+      description = "Question or problem."
+      allowed     = ["1", "2"] # Request is for officers
+      default     = "1"
     }
     statuscode = {
       type        = "choice"
@@ -124,6 +140,8 @@ resource "dataversecontact_table" "case" {
       # columns = { ShowOnPortal = "true", library = "Evidence", folder = "Photos" }
       # libraries = ["Evidence", "Archive"] # or: the libraries an upload invite may choose
       # invite_library = "row"              # or (Contact API 1.50.0): any library the row has a folder in
+      # Where uploads go, out of the libraries the row has a folder in (Contact API 1.58.0):
+      # allowed = { library = ["*-Shared-*"] } # a signed-in upload goes to the row's shared folder, not its first
     }
   }
 }
@@ -353,9 +371,17 @@ Required:
 
 Optional:
 
+- `allowed` (List of String) Write rule: the values a caller may send (e.g. ["1", "2"] for a choice). On a string field an entry may be a pattern where * is any characters, case ignored (e.g. "Comp*"); nothing else is special. Not on a datetime field. Needs Contact API 1.58.0 or later: an older API keeps the key but doesn't enforce it.
 - `bind_field` (String) For aliased fields: the navigation property for @odata.bind writes. If omitted, the API derives it from the lookup's navigation property. An API that reports derived values separately (Contact API with admin GET `derived`) keeps them out of state.
+- `default` (String) Write rule: written on a create that leaves the field out; the caller may send another allowed value. Must pass the field's own allowed, length and range rules. Needs Contact API 1.58.0 or later: an older API keeps the key but doesn't enforce it.
+- `fixed` (String) Write rule: the value the API writes on every create. A caller may send only this value, and can't change it on update. Written as a string and sent as the field's type ("3" for a choice, "true" for a boolean). The only rule a field with fixed may have; allowed on a read_only field, where the API writes it and the caller never sends it. Not on a lookup. Needs Contact API 1.58.0 or later: an older API keeps the key but doesn't enforce it.
 - `lookup_table` (String) For lookup fields: the route name of the target table.
+- `max` (Number) Write rule: the largest number a caller may send. Number fields only. Needs Contact API 1.58.0 or later: an older API keeps the key but doesn't enforce it.
+- `max_length` (Number) Write rule: the longest text a caller may send. String fields only. Needs Contact API 1.58.0 or later: an older API keeps the key but doesn't enforce it.
+- `min` (Number) Write rule: the smallest number a caller may send. Number fields only. Needs Contact API 1.58.0 or later: an older API keeps the key but doesn't enforce it.
+- `min_length` (Number) Write rule: the shortest text a caller may send. String fields only. Needs Contact API 1.58.0 or later: an older API keeps the key but doesn't enforce it.
 - `read_only` (Boolean) If true, field is read-only (not writable via PATCH).
+- `required` (Boolean) Write rule: a create must end up with a value (sent, preset by an invite, or default), and an update can't clear it. Needs Contact API 1.58.0 or later: an older API keeps the key but doesn't enforce it.
 - `value_field` (String) For polymorphic lookups: the underlying OData value column name.
 
 
@@ -431,12 +457,22 @@ Optional:
 
 Optional:
 
+- `allowed` (Attributes) Where an upload may go, as names or patterns where * is any characters (case ignored). library: the libraries, of those the row already has a folder in, an upload may use. An upload that names no library (a signed-in one) goes to the row's one folder in a matching library, not its first: none is a 409 upload_library_not_found, several a 409 upload_library_ambiguous, both before any bytes are sent. A folder is made only when library is one exact name. An upload invite's preset library must match and the row must have a folder there. Not with libraries, or a library fixed in columns. folder: the folders (below the row's) a caller or invite may put a file in; "" is the top. Not with a folder fixed in columns. Needs Contact API 1.58.0 or later: an older API keeps the key but doesn't enforce it. (see [below for nested schema](#nestedatt--documents--upload--allowed))
 - `columns` (Map of String) SharePoint column values set on every uploaded file, e.g. { ShowOnPortal = "true" } so an upload passes filters = ["ShowOnPortal eq true"]. Each column must be declared in documents.columns, with its value written as a string that suits the declared type: "true" or "false" for boolean, a number such as "4" for number; the provider sends each as its type. Callers can't set or override them, and if they can't be set the upload is undone. Two more fields say where every upload goes, as fixed values like any other (Contact API 1.48.0 or later): folder, a folder below the row's folder (e.g. folder = "Evidence/Photos"; a caller or invite can't then choose one), and library, a library's URL name (e.g. library = "Evidence"): the row's folder in that library, made the way Dataverse makes one if the row has none. That library needs the other fixed columns too.
 - `extensions` (List of String) File extensions accepted, lower case without the dot (e.g. ["pdf", "png", "jpg"]), matched case-insensitively. Leave it out for the API's default list: pdf, png, jpg, jpeg, gif, webp, heic, txt, rtf, doc, docx, xls, xlsx, csv, odt, ods. Executable types (exe, bat, cmd, com, js, msi, ps1, scr, vbs, sh, dll) are never accepted.
 - `invite_library` (String) "row": an upload invite's preset library may be any library the row already has a folder in, instead of one listed in libraries. No folder is made for it. Not with libraries, or with a library fixed in columns. Needs Contact API 1.50.0 or later: an older API refuses the key, and the table drops out of the scope.
 - `invites` (Boolean) Let an officer send a one-time invite link to upload one document to a row, for someone with no account (the invite tier: POST /invite/{route}/{id}/documents/uploads, then .../{uploadId}/complete). Sending one from the API needs invite and create on the documents permission at that tier (e.g. casedocuments = ["invite", "create"]); officers can also send them from the Portal Access app. Set the scope's invite_url on dataversecontact_permissions_sync so links point at the portal. Needs Contact API 1.37.0 or later.
 - `libraries` (List of String) The libraries an upload invite may send its file to, by URL name (e.g. ["Evidence", "Archive"]): the values its preset library may take, as a choice column's options are. Each needs the fixed columns, or uploads to it fail. Not with a library fixed in columns, which every upload goes to. Needs Contact API 1.48.0 or later: an older API refuses the key, and the table drops out of the scope.
 - `max_bytes` (Number) Largest file accepted, in bytes. Leave it out for 10485760 (10 MiB). Uploads are also capped by the deployment's DOCUMENT_UPLOAD_MAX_BYTES (26214400 = 25 MiB by default), so a larger value only applies where the deployment raised that.
+
+<a id="nestedatt--documents--upload--allowed"></a>
+### Nested Schema for `documents.upload.allowed`
+
+Optional:
+
+- `folder` (List of String) Folder paths or patterns below the row's folder, e.g. ["", "Photos*"] ("" is the top).
+- `library` (List of String) Library URL names or patterns, e.g. ["*-Shared-*"].
+
 
 
 
