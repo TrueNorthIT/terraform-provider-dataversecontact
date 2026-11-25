@@ -55,6 +55,11 @@ admin GET returns the hint as authored. Re-record it from the live API once 1.40
 route. The admin GET returns the hint as authored. Re-record it from the live API once 1.37.0 is
 deployed.
 
+**From the API contract, until it ships** (`get-table-published-case-queued-writes`): the
+`get-table-published-case-invites` fixture with `"queuedWrites": ["create", "update"]` on the table
+(API 1.60.0): the writes a client may ask to have queued with `Prefer: respond-async`. The admin GET
+returns the hint as authored. Re-record it from the live API once 1.60.0 is deployed.
+
 ## Refreshing
 
 When the API changes a response, update the fixture first, then make the client and the fake

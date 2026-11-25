@@ -528,6 +528,7 @@ func TestAccTable_everyAttribute(t *testing.T) {
   fetch_xml              = "<fetch><entity name='incident'/></fetch>"
   reference              = "ticketnumber"
   invites                = ["create", "update"]
+  queued_writes          = ["create", "update"]
   aliases                = ["cases", "ticket"]
   lookup_search_contains = ["title"]
   filters                = ["statecode eq 0", "casetypecode eq 1"]
@@ -599,6 +600,7 @@ func TestAccTable_everyAttribute(t *testing.T) {
 					statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("field_count"), knownvalue.Int64Exact(5)),
 					statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("reference"), knownvalue.StringExact("ticketnumber")),
 					statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("invites"), knownvalue.ListExact([]knownvalue.Check{knownvalue.StringExact("create"), knownvalue.StringExact("update")})),
+					statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("queued_writes"), knownvalue.ListExact([]knownvalue.Check{knownvalue.StringExact("create"), knownvalue.StringExact("update")})),
 					statecheck.ExpectKnownValue(caseAddress, tfjsonpath.New("documents").AtMapKey("upload").AtMapKey("invites"), knownvalue.Bool(true)),
 				},
 			},

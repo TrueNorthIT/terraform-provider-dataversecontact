@@ -44,6 +44,7 @@ type SchemaHintJSON struct {
 	FetchXml                  string                   `json:"fetchXml,omitempty"`
 	Reference                 string                   `json:"reference,omitempty"`
 	Invites                   []string                 `json:"invites,omitempty"`
+	QueuedWrites              []string                 `json:"queuedWrites,omitempty"`
 	Fields                    map[string]FieldHintJSON `json:"fields"`
 }
 
@@ -169,6 +170,7 @@ func modelToSchemaJSON(ctx context.Context, model *TableResourceModel, diags *di
 	hint.LookupSearchContains = tfListToStrings(ctx, model.LookupSearchContains, diags)
 	hint.Filters = tfListToStrings(ctx, model.Filters, diags)
 	hint.Invites = tfListToStrings(ctx, model.Invites, diags)
+	hint.QueuedWrites = tfListToStrings(ctx, model.QueuedWrites, diags)
 
 	// Default filters to ["statecode eq 0"] if not specified
 	if hint.Filters == nil {
@@ -289,6 +291,7 @@ func schemaJSONToModel(ctx context.Context, raw json.RawMessage, model *TableRes
 	model.LookupSearchContains = stringsToTFList(hint.LookupSearchContains)
 	model.Filters = stringsToTFList(hint.Filters)
 	model.Invites = stringsToTFListOrNull(hint.Invites)
+	model.QueuedWrites = stringsToTFListOrNull(hint.QueuedWrites)
 
 	// Booleans
 	if hint.PublicChoices != nil {

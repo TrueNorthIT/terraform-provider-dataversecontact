@@ -7,7 +7,10 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -622,5 +625,117 @@ func TestInvitesRoundTrip(t *testing.T) {
 	schemaJSONToModel(ctx, raw, back, &diags)
 	if !back.Documents.Upload.Invites.IsNull() {
 		t.Fatalf("documents.upload.invites = %v, want null", back.Documents.Upload.Invites)
+	}
+}
+
+// TestQueuedWritesRoundTrip: the operations a client may ask to have queued
+// are sent as queuedWrites as written and read back the same; a table without
+// them sends no key and reads back null, and an API that answers [] or null
+// reads back null too, so none of them shows a plan diff.
+func TestQueuedWritesRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	var diags diag.Diagnostics
+
+	model := func(queued types.List) *TableResourceModel {
+		return &TableResourceModel{
+			RouteName:            types.StringValue("case"),
+			DataverseTable:       types.StringValue("incidents"),
+			DataverseLogicalName: types.StringValue("incident"),
+			PrimaryKey:           types.StringValue("incidentid"),
+			RequiredPermission:   types.StringValue("case"),
+			DefaultSelect:        stringsToTFList([]string{"incidentid"}),
+			LookupFields:         stringsToTFList([]string{"title"}),
+			Fields:               fieldsJSONToModel(ctx, map[string]FieldHintJSON{}, types.MapNull(fieldObjectType()), &diags),
+			QueuedWrites:         queued,
+		}
+	}
+
+	raw := modelToSchemaJSON(ctx, model(stringsToTFList([]string{"create", "update"})), &diags)
+	if diags.HasError() {
+		t.Fatalf("modelToSchemaJSON: %v", diags.Errors())
+	}
+	if !strings.Contains(string(raw), `"queuedWrites":["create","update"]`) {
+		t.Fatalf("queuedWrites not sent: %s", raw)
+	}
+	back := &TableResourceModel{}
+	schemaJSONToModel(ctx, raw, back, &diags)
+	if diags.HasError() {
+		t.Fatalf("schemaJSONToModel: %v", diags.Errors())
+	}
+	if got := tfListToStrings(ctx, back.QueuedWrites, &diags); len(got) != 2 || got[0] != "create" || got[1] != "update" {
+		t.Fatalf("queued_writes read back as %v", got)
+	}
+
+	// Unset: no key, null back.
+	raw = modelToSchemaJSON(ctx, model(types.ListNull(types.StringType)), &diags)
+	if strings.Contains(string(raw), `"queuedWrites"`) {
+		t.Fatalf("queuedWrites sent when unset: %s", raw)
+	}
+	back = &TableResourceModel{}
+	schemaJSONToModel(ctx, raw, back, &diags)
+	if !back.QueuedWrites.IsNull() {
+		t.Fatalf("queued_writes = %v, want null", back.QueuedWrites)
+	}
+
+	// An API (or Table Manager) that saved [] or null reads back null, the
+	// same as absent, and the next apply sends no key.
+	for _, v := range []string{`[]`, `null`} {
+		raw := []byte(`{"routeName":"case","dataverseTable":"incidents","dataverseLogicalName":"incident",` +
+			`"requiredPermission":"case","primaryKey":"incidentid","defaultSelect":["incidentid"],` +
+			`"lookupFields":["title"],"fields":{},"queuedWrites":` + v + `}`)
+		back := &TableResourceModel{}
+		schemaJSONToModel(ctx, raw, back, &diags)
+		if diags.HasError() {
+			t.Fatalf("schemaJSONToModel(%s): %v", v, diags.Errors())
+		}
+		if !back.QueuedWrites.IsNull() {
+			t.Fatalf("queuedWrites %s read back as %v, want null", v, back.QueuedWrites)
+		}
+		if out := modelToSchemaJSON(ctx, back, &diags); strings.Contains(string(out), `"queuedWrites"`) {
+			t.Fatalf("queuedWrites %s sent back: %s", v, out)
+		}
+	}
+}
+
+// TestQueuedWritesValidation: queued_writes takes "create" and "update",
+// each once, and at least one (an empty list means the same as leaving it out).
+func TestQueuedWritesValidation(t *testing.T) {
+	ctx := context.Background()
+
+	var schemaResp resource.SchemaResponse
+	NewTableResource().Schema(ctx, resource.SchemaRequest{}, &schemaResp)
+	attr, ok := schemaResp.Schema.Attributes["queued_writes"].(rschema.ListAttribute)
+	if !ok {
+		t.Fatalf("queued_writes is not a list attribute")
+	}
+	if !attr.IsOptional() || attr.IsComputed() || attr.IsRequired() {
+		t.Fatalf("queued_writes should be Optional only")
+	}
+
+	for _, tc := range []struct {
+		name  string
+		value []string
+		ok    bool
+	}{
+		{"create", []string{"create"}, true},
+		{"update", []string{"update"}, true},
+		{"both", []string{"update", "create"}, true},
+		{"empty", []string{}, false},
+		{"duplicate", []string{"create", "create"}, false},
+		{"unknown operation", []string{"delete"}, false},
+		{"wrong case", []string{"Create"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := validator.ListRequest{Path: path.Root("queued_writes"), ConfigValue: stringsToTFList(tc.value)}
+			var failed bool
+			for _, v := range attr.Validators {
+				resp := &validator.ListResponse{}
+				v.ValidateList(ctx, req, resp)
+				failed = failed || resp.Diagnostics.HasError()
+			}
+			if failed == tc.ok {
+				t.Fatalf("%v: refused = %v, want %v", tc.value, failed, !tc.ok)
+			}
+		})
 	}
 }
