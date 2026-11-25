@@ -33,6 +33,12 @@ resource "dataversecontact_table" "case" {
   # a citizen quotes. Must be one of the fields below.
   reference = "ticketnumber"
 
+  # Let a portal raise a case without waiting on Dataverse: a create sent with
+  # Prefer: respond-async is checked, queued and answered 202 with the new id,
+  # then written in the background. Without a queue it's written as usual.
+  # (Contact API 1.60.0)
+  queued_writes = ["create"]
+
   fields = {
     title = {
       type        = "string"
@@ -351,6 +357,7 @@ A target's columns are published without anyone reviewing them — that is the t
 - `public_choices` (Boolean) Whether choice/option set values are publicly accessible. Defaults to true.
 - `public_create` (Boolean) Whether unauthenticated POST is allowed on the public tier.
 - `public_read` (Boolean) Whether this table is publicly readable without authentication.
+- `queued_writes` (List of String) Operations on this route a client may ask to have queued (`Prefer: respond-async`): the API answers 202 straight away and writes to Dataverse in the background. Falls back to a synchronous write when the deployment has no queue. Needs Contact API 1.60.0.
 - `reference` (String) The column people quote for a row, such as a case's "ticketnumber". Every request that touches a row of this table, or something attached to it (a note, a document upload, an action), logs the row's value as reference in App Insights, so a free-text search for the case number finds it. Must be one of fields, of type string or number. Needs Contact API 1.40.0 or later: an older API keeps the key without an error but logs nothing.
 - `required_permission` (String) The base permission name (e.g. "case"). If omitted, defaults to route_name.
 - `team_join_step` (Block List) Steps to join back to the account for team-scoped queries (ordered). (see [below for nested schema](#nestedblock--team_join_step))

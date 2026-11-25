@@ -18,6 +18,12 @@ resource "dataversecontact_table" "case" {
   # a citizen quotes. Must be one of the fields below.
   reference = "ticketnumber"
 
+  # Let a portal raise a case without waiting on Dataverse: a create sent with
+  # Prefer: respond-async is checked, queued and answered 202 with the new id,
+  # then written in the background. Without a queue it's written as usual.
+  # (Contact API 1.60.0)
+  queued_writes = ["create"]
+
   fields = {
     title = {
       type        = "string"

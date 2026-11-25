@@ -63,6 +63,7 @@ type TableResourceModel struct {
 	FetchXml             types.String          `tfsdk:"fetch_xml"`
 	Reference            types.String          `tfsdk:"reference"`
 	Invites              types.List            `tfsdk:"invites"`
+	QueuedWrites         types.List            `tfsdk:"queued_writes"`
 	Aliases              types.List            `tfsdk:"aliases"`
 	LookupSearchContains types.List            `tfsdk:"lookup_search_contains"`
 	Filters              types.List            `tfsdk:"filters"`
@@ -603,6 +604,18 @@ func (r *TableResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 					"app. A contact table takes \"update\" only. Uploads are documents.upload.invites. Set the " +
 					"scope's invite_url on dataversecontact_permissions_sync so links point at the portal. Needs " +
 					"Contact API 1.37.0 or later.",
+				Optional:    true,
+				ElementType: types.StringType,
+				Validators: []validator.List{
+					listvalidator.SizeAtLeast(1),
+					listvalidator.UniqueValues(),
+					listvalidator.ValueStringsAre(stringvalidator.OneOf("create", "update")),
+				},
+			},
+			"queued_writes": schema.ListAttribute{
+				Description: "Operations on this route a client may ask to have queued (`Prefer: respond-async`): " +
+					"the API answers 202 straight away and writes to Dataverse in the background. Falls back to a " +
+					"synchronous write when the deployment has no queue. Needs Contact API 1.60.0.",
 				Optional:    true,
 				ElementType: types.StringType,
 				Validators: []validator.List{
